@@ -284,3 +284,24 @@ class NNGDB:
         if layer_name not in self.wrapped_model.current_state:
             return f"No data available for layer '{layer_name}'."
         return self.wrapped_model.current_state[layer_name]['output']
+    
+    @handle_exceptions
+    def add_hook(self, hook_type: str, module_name: str, hook_name: str, hook_function: str):
+        if hook_type == "forward":
+            return self.custom_hook_manager.register_forward_hook(module_name, eval(hook_function), hook_name)
+        elif hook_type == "backward":
+            return self.custom_hook_manager.register_backward_hook(module_name, eval(hook_function), hook_name)
+        else:
+            return "Invalid hook type. Use 'forward' or 'backward'."
+    
+    @handle_exceptions
+    def remove_hook(self, hook_name: str):
+        return self.custom_hook_manager.remove_hook(hook_name)
+    
+    @handle_exceptions
+    def list_hooks(self):
+        return self.custom_hook_manager.list_hooks()
+
+    @handle_exceptions
+    def clear_hooks(self):
+        return self.custom_hook_manager.clear_all_hooks()

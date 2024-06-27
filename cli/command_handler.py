@@ -386,29 +386,22 @@ class CommandHandler:
             return method(self.debugger.wrapped_model.model, *technique_args)
         else:
             return f"Unknown technique: {technique_name}"
-        
+    
     @handle_exceptions
     def cmd_add_hook(self, *args):
         """
         Add a custom hook to a module.
         Usage: add_hook <forward|backward> <module_name> <hook_name> <hook_function>
         """
-        if len(args) != 4:
+        if len(args) < 4:
             return "Usage: add_hook <forward|backward> <module_name> <hook_name> <hook_function>"
         
-        hook_type, module_name, hook_name, hook_function = args
+        hook_type = args[0]
+        module_name = args[1]
+        hook_name = args[2]
+        hook_function = " ".join(args[3:])
         
-        try:
-            hook = eval(f"lambda module, input, output: {hook_function}")
-        except Exception as e:
-            return f"Error in hook function: {str(e)}"
-        
-        if hook_type == "forward":
-            return self.debugger.custom_hook_manager.register_forward_hook(module_name, hook, hook_name)
-        elif hook_type == "backward":
-            return self.debugger.custom_hook_manager.register_backward_hook(module_name, hook, hook_name)
-        else:
-            return "Invalid hook type. Use 'forward' or 'backward'."
+        return self.debugger.add_hook(hook_type, module_name, hook_name, hook_function)
 
     @handle_exceptions
     def cmd_remove_hook(self, *args):
@@ -420,20 +413,20 @@ class CommandHandler:
             return "Usage: remove_hook <hook_name>"
         
         hook_name = args[0]
-        return self.debugger.custom_hook_manager.remove_hook(hook_name)
-
+        return self.debugger.remove_hook(hook_name)
+    
     @handle_exceptions
     def cmd_list_hooks(self, *args):
         """
         List all registered custom hooks.
         Usage: list_hooks
         """
-        return self.debugger.custom_hook_manager.list_hooks()
-
+        return self.debugger.list_hooks()
+    
     @handle_exceptions
     def cmd_clear_hooks(self, *args):
         """
         Clear all custom hooks.
         Usage: clear_hooks
         """
-        return self.debugger.custom_hook_manager.clear_all_hooks()
+        return self.debugger.clear_hooks()
