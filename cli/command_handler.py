@@ -289,28 +289,6 @@ class CommandHandler:
         return self.debugger.redo()
     
     @handle_exceptions
-    def cmd_token_attention(self, *args):
-        """
-        Get attention weights for a specific layer and attention head.
-        Usage: token_attention <layer_name> <head_index>
-        """
-        if len(args) != 2:
-            return "Usage: token_attention <layer_name> <head_index>"
-        layer_name, head_index = args[0], int(args[1])
-        return self.debugger.get_token_attention(layer_name, head_index)
-
-    @handle_exceptions
-    def cmd_token_representation(self, *args):
-        """
-        Get token representations for a specific layer.
-        Usage: token_representation <layer_name>
-        """
-        if len(args) != 1:
-            return "Usage: token_representation <layer_name>"
-        layer_name = args[0]
-        return self.debugger.get_token_representation(layer_name)
-    
-    @handle_exceptions
     def cmd_reset_weights(self, *args):
         """
         Reset all modified weights to their original values.
@@ -321,19 +299,60 @@ class CommandHandler:
     @handle_exceptions
     def cmd_analyze_tokens(self, *args):
         """
-        Analyze token probabilities for the given input, optionally comparing with modified weights.
-        Usage: analyze_tokens <input_text> [top_k] [--compare-modified]
+        Analyze tokens with various methods.
+        Usage: analyze_tokens <input_text> <analysis_type> [options]
+        Analysis types: probabilities, saliency, attention, counterfactual, attribution, neuron_activation, representation_tracking, clustering, importance_ranking
+        Options:
+          --top_k <int>: Number of top tokens to show (for probabilities)
+          --compare_modified: Compare with modified weights (for probabilities)
+          --layer <int>: Layer to analyze (for attention, neuron_activation, clustering)
+          --head <int>: Attention head to analyze (for attention)
+          --token_index <int>: Token to analyze (for counterfactual)
+          --replacements <str1,str2,...>: Replacement tokens (for counterfactual)
+          --method <str>: Attribution method (for attribution)
+          --n_clusters <int>: Number of clusters (for clustering)
         """
-        if not args:
-            return "Usage: analyze_tokens <input_text> [top_k] [--compare-modified]"
-    
-        compare_modified = "--compare-modified" in args
-        args = [arg for arg in args if arg != "--compare-modified"]
-    
-        input_text = " ".join(args[:-1]) if len(args) > 1 and args[-1].isdigit() else " ".join(args)
-        top_k = int(args[-1]) if len(args) > 1 and args[-1].isdigit() else 5
-    
-        return self.debugger.analyze_tokens(input_text, top_k, compare_modified)
+        if len(args) < 2:
+            return self.cmd_analyze_tokens.__doc__
+
+        # Find the index of the analysis type
+        analysis_type_index = next((i for i, arg in enumerate(args) if arg in ['probabilities', 'saliency', 'attention', 'counterfactual', 'attribution', 'neuron_activation', 'representation_tracking', 'clustering', 'importance_ranking']), None)
+
+        if analysis_type_index is None:
+            return "Invalid analysis type. Please specify a valid analysis type."
+
+        input_text = " ".join(args[:analysis_type_index])
+        analysis_type = args[analysis_type_index]
+        options = self._parse_options(args[analysis_type_index+1:])
+
+        # Convert layer and head to integers if present
+        if 'layer' in options:
+            options['layer'] = int(options['layer'])
+        if 'head' in options:
+            options['head'] = int(options['head'])
+
+        compare_modified = options.pop('compare_modified', False)
+        return self.debugger.analyze_tokens(input_text, analysis_type, compare_modified, **options)
+
+
+    @handle_exceptions
+    def cmd_analyze_token_attention_representation(self, *args):
+        """
+        Analyze token attention and/or representation.
+        Usage: analyze_token_attention_representation <input_text> [options]
+        Options:
+          --layer <int>: Layer to analyze (default: -1)
+          --head <int>: Attention head to analyze (default: None, means all heads)
+          --attention <bool>: Include attention analysis (default: True)
+          --representation <bool>: Include representation analysis (default: True)
+        """
+        if len(args) < 1:
+            return self.cmd_analyze_token_attention_representation.__doc__
+
+        input_text = args[0]
+        options = self._parse_options(args[1:])
+
+        return self.debugger.analyze_token_attention_and_representation(input_text, **options)
 
     
     @handle_exceptions
@@ -415,3 +434,112 @@ class CommandHandler:
         Usage: clear_hooks
         """
         return self.debugger.clear_hooks()
+    
+    @handle_exceptions
+    def _parse_options(self, args):
+        options = {}
+        for i in range(0, len(args), 2):
+            if args[i] == '--compare_modified':
+                options['compare_modified'] = True
+                continue
+            if i + 1 < len(args):
+                key = args[i].lstrip('-')
+                value = args[i + 1]
+                if value.isdigit():
+                    options[key] = int(value)
+                elif value.lower() in ['true', 'false']:
+                    options[key] = value.lower() == 'true'
+                elif ',' in value:
+                    options[key] = value.split(',')
+                else:
+                    options[key] = value
+        return options
+    
+    @handle_exceptions
+    def cmd_experiment(self, *args):
+        """
+        Manage and compare experiments.
+        Usage:
+            experiment create <name>
+            experiment switch <name>
+            experiment list
+            experiment delete <name>
+            experiment compare <exp1> <exp2> <input_text> [analysis_type] [options]
+            experiment current
+        """
+        if not args:
+            return self.cmd_experiment.__doc__
+
+        subcommand = args[0]
+        if subcommand == "create":
+            return self._experiment_create(args[1:])
+        elif subcommand == "switch":
+            return self._experiment_switch(args[1:])
+        elif subcommand == "list":
+            return self._experiment_list(args[1:])
+        elif subcommand == "delete":
+            return self._experiment_delete(args[1:])
+        elif subcommand == "compare":
+            return self._experiment_compare(args[1:])
+        elif subcommand == "current":
+            return self._experiment_current(args[1:])
+        else:
+            return f"Unknown experiment subcommand: {subcommand}"
+
+    def _experiment_create(self, args):
+        """
+        Create a new experiment.
+        Usage: experiment create <name>
+        """
+        if len(args) != 1:
+            return "Usage: experiment create <name>"
+        return self.debugger.create_experiment(args[0])
+
+    def _experiment_switch(self, args):
+        """
+        Switch to an existing experiment.
+        Usage: experiment switch <name>
+        """
+        if len(args) != 1:
+            return "Usage: experiment switch <name>"
+        return self.debugger.switch_experiment(args[0])
+
+    def _experiment_list(self, args):
+        """
+        List all available experiments.
+        Usage: experiment list
+        """
+        experiments = self.debugger.list_experiments()
+        if not experiments:
+            return "No experiments available."
+        return "Available experiments:\n" + "\n".join(experiments)
+
+    def _experiment_delete(self, args):
+        """
+        Delete an existing experiment.
+        Usage: experiment delete <name>
+        """
+        if len(args) != 1:
+            return "Usage: experiment delete <name>"
+        return self.debugger.delete_experiment(args[0])
+
+    def _experiment_compare(self, args):
+        """
+        Compare two experiments.
+        Usage: experiment compare <exp1> <exp2> <input_text> [analysis_type] [options]
+        """
+        if len(args) < 3:
+            return "Usage: experiment compare <exp1> <exp2> <input_text> [analysis_type] [options]"
+        exp1, exp2 = args[0], args[1]
+        input_text = args[2]
+        analysis_type = args[3] if len(args) > 3 else 'probabilities'
+        options = self._parse_options(args[4:])
+        return self.debugger.compare_experiments(exp1, exp2, input_text, analysis_type, **options)
+
+    def _experiment_current(self, args):
+        """
+        Show the current active experiment.
+        Usage: experiment current
+        """
+        current_exp = self.debugger.get_current_experiment()
+        return f"Current experiment: {current_exp}" if current_exp else "No active experiment."

@@ -9,8 +9,10 @@ from inspection import ModelInspector, LayerInspector, WeightInspector, Activati
 from breakpoints import BreakpointManager
 from tracing import ExecutionTracer, ActivationTracer, GradientTracer
 from analysis.token_probability import TokenProbabilityAnalyzer
+from analysis.token_analyzer import TokenAnalyzer
 from core.undo_manager import UndoManager
 from advanced.custom_hooks import CustomHookManager
+from experiments.experiment_manager import ExperimentManager
 
 class NNGDB:
     def __init__(self, model: torch.nn.Module, model_name: str, device: str):
@@ -39,40 +41,33 @@ class NNGDB:
         self.token_analyzer = TokenProbabilityAnalyzer(model, self.tokenizer)
 
         self.custom_hook_manager = CustomHookManager(self.wrapped_model.model)
+        self.token_analyzer = TokenAnalyzer(self.wrapped_model.model, self.tokenizer, self.device)
+
+        self.experiment_manager = ExperimentManager(self.wrapped_model.model)
 
     @handle_exceptions
     def compare_token_probabilities(self, index1, index2):
         return self.token_analyzer.compare(index1, index2)
     
     @handle_exceptions
-    def analyze_tokens(self, input_text: str, top_k: int = 5, compare_modified: bool = False):
-        original_result = self.token_analyzer.analyze(input_text, top_k)
+    def analyze_tokens(self, input_text: str, analysis_type: str, compare_modified: bool = False, **kwargs):
+        result = self.token_analyzer.analyze(input_text, analysis_type, compare_modified, **kwargs)
+        
+        if analysis_type == 'probabilities' and compare_modified:
+            comparison = f"Original analysis:\n{self._format_token_analysis(result['original'])}\n\n"
+            comparison += f"Analysis with modified weights:\n{self._format_token_analysis(result['modified'])}"
+            return comparison
+        elif analysis_type == 'probabilities':
+            return self._format_token_analysis(result)
+        elif analysis_type == 'saliency':
+            return self._format_saliency_analysis(result)
+        elif analysis_type == 'attention':
+            return self._format_attention_analysis(result)
+        else:
+            return result
     
-        if not compare_modified:
-            return self._format_token_analysis(original_result)
-    
-        # If comparing with modified weights, perform the analysis again
-        input_ids = self.tokenizer.encode(input_text, return_tensors="pt").to(self.device)
-    
-        with torch.no_grad():
-            outputs = self.wrapped_model.model(input_ids)
-            logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
-    
-        probs = torch.softmax(logits[0, -1], dim=-1)
-        top_probs, top_indices = torch.topk(probs, top_k)
-    
-        modified_result = {
-            "input_text": input_text,
-            "top_tokens": [
-                (self.tokenizer.decode([idx.item()]), prob.item())
-                for idx, prob in zip(top_indices, top_probs)
-            ]
-        }
-    
-        comparison = f"Original analysis:\n{self._format_token_analysis(original_result)}\n\n"
-        comparison += f"Analysis with modified weights:\n{self._format_token_analysis(modified_result)}"
-    
-        return comparison
+    def analyze_token_attention_and_representation(self, input_text: str, **kwargs):
+        return self.token_analyzer.analyze_attention_and_representation(input_text, **kwargs)
 
     @handle_exceptions
     def undo(self):
@@ -219,33 +214,6 @@ class NNGDB:
         return self.execution_engine.continue_execution()
     
     @handle_exceptions
-    def get_token_attention(self, layer_name: str, head_index: int):
-        layer = self.wrapped_model.get_layer(layer_name)
-        if layer is None:
-            return f"Layer '{layer_name}' not found."
-        
-        if not hasattr(layer, 'self_attn'):
-            return f"Layer '{layer_name}' does not have attention weights."
-        
-        attention = layer.self_attn.attention_weights
-        if attention is None:
-            return f"No attention weights available for layer '{layer_name}'."
-        
-        if head_index >= attention.size(1):
-            return f"Invalid head index. Layer '{layer_name}' has {attention.size(1)} attention heads."
-        
-        head_attention = attention[0, head_index].cpu().detach().numpy()
-        return head_attention
-
-    @handle_exceptions
-    def get_token_representation(self, layer_name: str):
-        if layer_name not in self.wrapped_model.current_state:
-            return f"No data available for layer '{layer_name}'."
-        
-        hidden_states = self.wrapped_model.current_state[layer_name]['output'][0]
-        return hidden_states.cpu().detach().numpy()
-    
-    @handle_exceptions
     def get_gradient_trace(self, layer_name: str):
         return self.gradient_tracer.get_gradient(layer_name)
     
@@ -297,3 +265,57 @@ class NNGDB:
         formatted = f"Input: {analysis['input_text']}\nTop {len(analysis['top_tokens'])} tokens:\n"
         formatted += "\n".join([f"{token}: {prob:.4f}" for token, prob in analysis['top_tokens']])
         return formatted
+    
+    @handle_exceptions
+    def _format_saliency_analysis(self, analysis):
+        formatted = "Saliency Analysis:\n"
+        for token, saliency in zip(analysis['tokens'], analysis['saliency']):
+            formatted += f"{token}: {saliency:.4f}\n"
+        return formatted
+    
+    @handle_exceptions
+    def _format_attention_analysis(self, analysis):
+        formatted = "Attention Analysis:\n"
+        formatted += f"Tokens: {', '.join(analysis['tokens'])}\n"
+        formatted += "Attention weights:\n"
+        for i, token in enumerate(analysis['tokens']):
+            formatted += f"{token}: {analysis['attention_weights'][i]}\n"
+        return formatted
+    
+    @handle_exceptions
+    def create_experiment(self, name):
+        return self.experiment_manager.create_experiment(name)
+
+    @handle_exceptions
+    def switch_experiment(self, name):
+        return self.experiment_manager.switch_experiment(name)
+
+    @handle_exceptions
+    def list_experiments(self):
+        return self.experiment_manager.list_experiments()
+
+    @handle_exceptions
+    def delete_experiment(self, name):
+        return self.experiment_manager.delete_experiment(name)
+
+    @handle_exceptions
+    def get_current_experiment(self):
+        return self.experiment_manager.get_current_experiment()
+
+    @handle_exceptions
+    def compare_experiments(self, exp1, exp2, input_text, analysis_type='probabilities', **kwargs):
+        current_exp = self.get_current_experiment()
+        
+        self.switch_experiment(exp1)
+        result1 = self.analyze_tokens(input_text, analysis_type, **kwargs)
+        
+        self.switch_experiment(exp2)
+        result2 = self.analyze_tokens(input_text, analysis_type, **kwargs)
+        
+        # Switch back to the original experiment
+        if current_exp:
+            self.switch_experiment(current_exp)
+        
+        comparison = f"Experiment '{exp1}':\n{result1}\n\n"
+        comparison += f"Experiment '{exp2}':\n{result2}"
+        return comparison
