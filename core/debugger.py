@@ -41,24 +41,38 @@ class NNGDB:
         self.custom_hook_manager = CustomHookManager(self.wrapped_model.model)
 
     @handle_exceptions
-    def analyze_token_probabilities(self, input_text, top_k=5):
-        if self.tokenizer is None:
-            return "Error: Tokenizer not initialized"
-        try:
-            result = self.token_analyzer.analyze(input_text, top_k)
-            return f"Input: {input_text}\nTop {top_k} tokens:\n" + "\n".join([f"{token}: {prob:.4f}" for token, prob in result['top_tokens']])
-        except Exception as e:
-            return f"Error analyzing tokens: {str(e)}"
-
-    @handle_exceptions
     def compare_token_probabilities(self, index1, index2):
         return self.token_analyzer.compare(index1, index2)
     
     @handle_exceptions
-    def analyze_tokens(self, input_text: str, top_k: int = 5):
-        if self.tokenizer is None:
-            return "Error: Tokenizer not initialized"
-        return self.token_analyzer.analyze(input_text, top_k)
+    def analyze_tokens(self, input_text: str, top_k: int = 5, compare_modified: bool = False):
+        original_result = self.token_analyzer.analyze(input_text, top_k)
+    
+        if not compare_modified:
+            return self._format_token_analysis(original_result)
+    
+        # If comparing with modified weights, perform the analysis again
+        input_ids = self.tokenizer.encode(input_text, return_tensors="pt").to(self.device)
+    
+        with torch.no_grad():
+            outputs = self.wrapped_model.model(input_ids)
+            logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
+    
+        probs = torch.softmax(logits[0, -1], dim=-1)
+        top_probs, top_indices = torch.topk(probs, top_k)
+    
+        modified_result = {
+            "input_text": input_text,
+            "top_tokens": [
+                (self.tokenizer.decode([idx.item()]), prob.item())
+                for idx, prob in zip(top_indices, top_probs)
+            ]
+        }
+    
+        comparison = f"Original analysis:\n{self._format_token_analysis(original_result)}\n\n"
+        comparison += f"Analysis with modified weights:\n{self._format_token_analysis(modified_result)}"
+    
+        return comparison
 
     @handle_exceptions
     def undo(self):
@@ -248,34 +262,6 @@ class NNGDB:
             return f"Error modifying activation: {str(e)}"
 
     @handle_exceptions
-    def analyze_tokens_with_modified_weights(self, input_text, top_k=5):
-        original_result = self.analyze_token_probabilities(input_text, top_k)
-        
-        # Ensure the input is on the correct device
-        input_ids = self.tokenizer.encode(input_text, return_tensors="pt").to(self.device)
-        
-        with torch.no_grad():
-            outputs = self.wrapped_model.model(input_ids)
-            logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
-        
-        probs = torch.softmax(logits[0, -1], dim=-1)
-        top_probs, top_indices = torch.topk(probs, top_k)
-        
-        modified_result = {
-            "input_text": input_text,
-            "top_tokens": [
-                (self.tokenizer.decode([idx.item()]), prob.item())
-                for idx, prob in zip(top_indices, top_probs)
-            ]
-        }
-        
-        comparison = f"Original analysis:\n{original_result}\n\n"
-        comparison += f"Analysis with modified weights:\n"
-        comparison += f"Input: {input_text}\nTop {top_k} tokens:\n" + "\n".join([f"{token}: {prob:.4f}" for token, prob in modified_result['top_tokens']])
-        
-        return comparison
-
-    @handle_exceptions
     def reset_modified_weights(self):
         return self.wrapped_model.reset_modified_weights()
 
@@ -305,3 +291,9 @@ class NNGDB:
     @handle_exceptions
     def clear_hooks(self):
         return self.custom_hook_manager.clear_all_hooks()
+    
+    @handle_exceptions
+    def _format_token_analysis(self, analysis):
+        formatted = f"Input: {analysis['input_text']}\nTop {len(analysis['top_tokens'])} tokens:\n"
+        formatted += "\n".join([f"{token}: {prob:.4f}" for token, prob in analysis['top_tokens']])
+        return formatted

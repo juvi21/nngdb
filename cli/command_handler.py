@@ -118,6 +118,7 @@ class CommandHandler:
         return self.debugger.continue_execution()
 
     @handle_exceptions
+    @handle_exceptions
     def cmd_modify(self, *args):
         """
         Modify weights or activations in the model.
@@ -152,19 +153,23 @@ class CommandHandler:
     @handle_exceptions
     def cmd_analyze(self, *args):
         """
-        Perform analysis on the model.
+        P   erform analysis on the model.
         Usage: analyze <type> [<args>]
-        Types: gradients, attention, activations
+        Types: gradients, attention, activations, tokens
         """
         if not args:
             return "Usage: analyze <type> [<args>]"
         analysis_type = args[0]
         if analysis_type == "gradients":
-            return self.debugger.analyze_gradients()
+            return self.debugger.gradient_inspector.inspect(args[1] if len(args) > 1 else None)
         elif analysis_type == "attention":
-            return self.debugger.analyze_attention()
+            return self.debugger.attention_inspector.inspect(args[1] if len(args) > 1 else None)
         elif analysis_type == "activations":
-            return self.debugger.analyze_activations()
+            return self.debugger.activation_inspector.inspect(args[1] if len(args) > 1 else None)
+        elif analysis_type == "tokens":
+            input_text = " ".join(args[1:-1]) if len(args) > 2 and args[-1].isdigit() else " ".join(args[1:])
+            top_k = int(args[-1]) if len(args) > 2 and args[-1].isdigit() else 5
+            return self.debugger.analyze_tokens(input_text, top_k)
         else:
             return f"Unknown analysis type: {analysis_type}"
     
@@ -254,18 +259,6 @@ class CommandHandler:
         return self.debugger.clear_all_traces()
     
     @handle_exceptions
-    def cmd_analyze_tokens(self, *args):
-        """
-        Analyze token probabilities for the given input.
-        Usage: analyze_tokens <input_text> [top_k]
-        """
-        if not args:
-            return "Usage: analyze_tokens <input_text> [top_k]"
-        input_text = " ".join(args[:-1]) if len(args) > 1 and args[-1].isdigit() else " ".join(args)
-        top_k = int(args[-1]) if len(args) > 1 and args[-1].isdigit() else 5
-        return self.debugger.analyze_token_probabilities(input_text, top_k)
-    
-    @handle_exceptions
     def cmd_compare_tokens(self, *args):
         """
         Compare token probabilities between two analyses.
@@ -318,20 +311,6 @@ class CommandHandler:
         return self.debugger.get_token_representation(layer_name)
     
     @handle_exceptions
-    def cmd_modify_weight(self, *args):
-        """
-        Modify a weight in the model.
-        Usage: modify_weight <layer_name> <weight_name> <indices> <value>
-        """
-        if len(args) < 4:
-            return "Usage: modify_weight <layer_name> <weight_name> <indices> <value>"
-        layer_name = args[0]
-        weight_name = args[1]
-        indices = eval(args[2])  # Be careful with eval, ensure proper input validation
-        value = float(args[3])
-        return self.debugger.modify_weight(layer_name, weight_name, indices, value)
-    
-    @handle_exceptions
     def cmd_reset_weights(self, *args):
         """
         Reset all modified weights to their original values.
@@ -340,16 +319,22 @@ class CommandHandler:
         return self.debugger.reset_modified_weights()
 
     @handle_exceptions
-    def cmd_analyze_tokens_modified(self, *args):
+    def cmd_analyze_tokens(self, *args):
         """
-        Analyze token probabilities with modified weights and compare to original.
-        Usage: analyze_tokens_modified <input_text> [top_k]
+        Analyze token probabilities for the given input, optionally comparing with modified weights.
+        Usage: analyze_tokens <input_text> [top_k] [--compare-modified]
         """
         if not args:
-            return "Usage: analyze_tokens_modified <input_text> [top_k]"
+            return "Usage: analyze_tokens <input_text> [top_k] [--compare-modified]"
+    
+        compare_modified = "--compare-modified" in args
+        args = [arg for arg in args if arg != "--compare-modified"]
+    
         input_text = " ".join(args[:-1]) if len(args) > 1 and args[-1].isdigit() else " ".join(args)
         top_k = int(args[-1]) if len(args) > 1 and args[-1].isdigit() else 5
-        return self.debugger.analyze_tokens_with_modified_weights(input_text, top_k)
+    
+        return self.debugger.analyze_tokens(input_text, top_k, compare_modified)
+
     
     @handle_exceptions
     def cmd_interpretability(self, *args):
