@@ -2,18 +2,21 @@ import torch
 from typing import Callable, Dict, Any
 
 class CustomHookManager:
-    def __init__(self):
+    def __init__(self, model: torch.nn.Module):
+        self.model = model
         self.hooks: Dict[str, Any] = {}
 
-    def register_forward_hook(self, module: torch.nn.Module, hook: Callable, name: str):
+    def register_forward_hook(self, module_name: str, hook: Callable, name: str):
+        module = dict(self.model.named_modules())[module_name]
         handle = module.register_forward_hook(hook)
         self.hooks[name] = handle
-        return f"Forward hook '{name}' registered"
+        return f"Forward hook '{name}' registered for module '{module_name}'"
 
-    def register_backward_hook(self, module: torch.nn.Module, hook: Callable, name: str):
+    def register_backward_hook(self, module_name: str, hook: Callable, name: str):
+        module = dict(self.model.named_modules())[module_name]
         handle = module.register_full_backward_hook(hook)
         self.hooks[name] = handle
-        return f"Backward hook '{name}' registered"
+        return f"Backward hook '{name}' registered for module '{module_name}'"
 
     def remove_hook(self, name: str):
         if name in self.hooks:

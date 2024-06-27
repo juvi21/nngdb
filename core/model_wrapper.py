@@ -91,18 +91,18 @@ class ModelWrapper(nn.Module):
         if not self.current_state:
             return "Error: No execution state. Run the model first."
         
-        for name in self.layer_order:
-            if name == target_layer:
-                if name in self.current_state:
-                    return self.current_state[name]['output']
-                else:
-                    return f"Error: Layer {name} not found in current state"
-            
-            if name in self.current_state:
-                module = dict(self.model.named_modules())[name]
-                self.current_state[name]['output'] = module(self.current_state[name]['input'][0])
+        def find_layer(model, target):
+            for name, child in model.named_children():
+                if name == target:
+                    return child
+                result = find_layer(child, target)
+                if result is not None:
+                    return result
+            return None
 
-        return f"Error: Layer {target_layer} not found"
+        target_module = find_layer(self.model, target_layer)
+        if target_module is None:
+            return f"Error: Layer {target_layer} not found"
     
     def get_attention_weights(self, layer_name: str):
         return self.attention_weights.get(layer_name)

@@ -80,8 +80,19 @@ class PerturbationAnalyzer:
         }
 
     def compute_saliency_map(self, input_tensor: torch.Tensor):
-        input_gradient = self.compute_input_gradient(input_tensor)
-        saliency_map = input_gradient["input_gradient"].abs()
+        input_tensor.requires_grad_(True)
+        output = self.wrapped_model.model(input_tensor)
+        
+        if isinstance(output, torch.Tensor):
+            loss = output.sum()
+        elif isinstance(output, tuple):
+            loss = output[0].sum()
+        else:
+            return "Unexpected output type. Unable to compute saliency map."
+
+        loss.backward()
+
+        saliency_map = input_tensor.grad.abs()
         
         return {
             "saliency_map": saliency_map,

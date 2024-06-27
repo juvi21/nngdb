@@ -5,6 +5,7 @@ class ExecutionEngine:
     def __init__(self, wrapped_model: ModelWrapper):
         self.wrapped_model = wrapped_model
         self.current_layer_index = 0
+        self.last_input = None
 
     def run(self, input_data: torch.Tensor):
         self.wrapped_model.execution_paused = False

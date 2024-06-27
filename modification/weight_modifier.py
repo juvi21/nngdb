@@ -18,7 +18,8 @@ class WeightModifier:
             return f"'{weight_name}' is not a tensor in layer '{layer_name}'."
 
         try:
-            weight[indices] = value
+            with torch.no_grad():
+                weight[indices] = value
             return f"Weight at {layer_name}.{weight_name}{indices} modified to {value}"
         except Exception as e:
             return f"Error modifying weight: {str(e)}"
