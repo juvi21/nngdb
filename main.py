@@ -1,25 +1,27 @@
+import argparse
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from debugger.core import NNGDB
-from console.command_handler import CommandHandler
-from console.repl import NNGDBREPL
-from experiment.config import load_config
+
+from core import NNGDB
+from cli import NNGDBREPL
 
 def main():
-    # Load configuration
-    config = load_config('config.yaml')
+    parser = argparse.ArgumentParser(description="Neural Network GDB (NNGDB)")
+    parser.add_argument("--model", type=str, default="gpt2", help="Model name or path")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to run the model on")
+    args = parser.parse_args()
 
-    # Load TinyLlama model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained(config['model_name'])
-    tokenizer = AutoTokenizer.from_pretrained(config['model_name'])
-    
-    debugger = NNGDB(model)
+    print(f"Loading model: {args.model}")
+    model = AutoModelForCausalLM.from_pretrained(args.model).to(args.device)
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+
+    print(f"Initializing NNGDB")
+    debugger = NNGDB(model, args.model, args.device)
     debugger.set_context('tokenizer', tokenizer)
-    
-    command_handler = CommandHandler(debugger)
-    repl = NNGDBREPL(command_handler)
-    
-    print("Welcome to NNGDB (Neural Network GDB)")
-    print("Type 'help' for a list of commands, or 'quit' to exit.")
+    debugger.set_context('device', args.device)
+
+    print("Starting NNGDB REPL")
+    repl = NNGDBREPL(debugger)
     repl.run()
 
 if __name__ == "__main__":

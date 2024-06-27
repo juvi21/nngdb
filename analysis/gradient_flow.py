@@ -1,34 +1,49 @@
 import torch
-import matplotlib.pyplot as plt
+from core.model_wrapper import ModelWrapper
 
-def analyze_gradient_flow(model: torch.nn.Module):
-    if not any(p.grad is not None for p in model.parameters()):
-        return "No gradients available. Run a backward pass first."
+class GradientFlowAnalyzer:
+    def __init__(self, wrapped_model: ModelWrapper):
+        self.wrapped_model = wrapped_model
 
-    avg_grads = []
-    layers = []
-    for n, p in model.named_parameters():
-        if p.requires_grad and p.grad is not None:
-            layers.append(n)
-            avg_grads.append(p.grad.abs().mean().item())
-    
-    plt.bar(range(len(avg_grads)), avg_grads, align='center')
-    plt.xticks(range(len(avg_grads)), layers, rotation='vertical')
-    plt.xlabel('Layers')
-    plt.ylabel('Average gradient')
-    plt.title('Gradient flow')
-    plt.tight_layout()
-    plt.show()
+    def analyze(self):
+        gradients = {}
+        for name, param in self.wrapped_model.model.named_parameters():
+            if param.requires_grad and param.grad is not None:
+                gradients[name] = {
+                    'mean': param.grad.abs().mean().item(),
+                    'std': param.grad.std().item(),
+                    'max': param.grad.abs().max().item(),
+                    'norm': param.grad.norm().item()
+                }
 
-def detect_vanishing_exploding_gradients(model: torch.nn.Module, threshold=1e-4):
-    vanishing = []
-    exploding = []
-    for n, p in model.named_parameters():
-        if p.requires_grad:
-            if p.grad is not None:
-                grad_norm = p.grad.norm().item()
+        return gradients
+
+    def detect_vanishing_exploding_gradients(self, threshold=1e-4):
+        vanishing = []
+        exploding = []
+        for name, param in self.wrapped_model.model.named_parameters():
+            if param.requires_grad and param.grad is not None:
+                grad_norm = param.grad.norm().item()
                 if grad_norm < threshold:
-                    vanishing.append((n, grad_norm))
+                    vanishing.append((name, grad_norm))
                 elif grad_norm > 1/threshold:
-                    exploding.append((n, grad_norm))
-    return vanishing, exploding
+                    exploding.append((name, grad_norm))
+        
+        return {
+            'vanishing': vanishing,
+            'exploding': exploding
+        }
+
+    def compute_layer_gradients(self):
+        layer_gradients = {}
+        for name, module in self.wrapped_model.model.named_modules():
+            if list(module.children()):  # skip container modules
+                continue
+            layer_grad = torch.cat([p.grad.view(-1) for p in module.parameters() if p.grad is not None])
+            layer_gradients[name] = {
+                'mean': layer_grad.abs().mean().item(),
+                'std': layer_grad.std().item(),
+                'max': layer_grad.abs().max().item(),
+                'norm': layer_grad.norm().item()
+            }
+        return layer_gradients

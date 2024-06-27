@@ -1,23 +1,20 @@
 import torch
-from transformers import PreTrainedTokenizer
 
-def generate_random_input(tokenizer: PreTrainedTokenizer, max_length: int = 50):
-    vocab_size = tokenizer.vocab_size
-    random_ids = torch.randint(0, vocab_size, (1, max_length))
-    return random_ids
+def generate_random_input(input_shape: tuple, device: str = 'cpu'):
+    return torch.randn(input_shape).to(device)
 
-def generate_adversarial_input(model: torch.nn.Module, tokenizer: PreTrainedTokenizer, target_label: int, max_iterations: int = 100):
-    input_ids = generate_random_input(tokenizer)
-    input_ids.requires_grad = True
-    optimizer = torch.optim.Adam([input_ids], lr=0.1)
+def generate_adversarial_input(model: torch.nn.Module, original_input: torch.Tensor, target_class: int, epsilon: float = 0.01, num_steps: int = 10):
+    perturbed_input = original_input.clone().detach().requires_grad_(True)
     
-    for _ in range(max_iterations):
-        optimizer.zero_grad()
-        outputs = model(input_ids)
-        loss = -outputs.logits[0, target_label]
+    for _ in range(num_steps):
+        output = model(perturbed_input)
+        loss = -output[0, target_class]
         loss.backward()
-        optimizer.step()
         
-        input_ids.data = torch.clamp(input_ids.data, 0, tokenizer.vocab_size - 1)
+        with torch.no_grad():
+            perturbed_input += epsilon * perturbed_input.grad.sign()
+            perturbed_input.clamp_(0, 1)  # Assuming input values are between 0 and 1
+        
+        perturbed_input.grad.zero_()
     
-    return input_ids.detach().long()
+    return perturbed_input.detach()
