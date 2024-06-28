@@ -14,8 +14,10 @@ class NNGDBREPL:
         readline.set_completer(rlcompleter.Completer(self.__dict__).complete)
 
     def run(self):
-        print("Welcome to NNGDB (Neural Network GDB)")
+        print("Welcome to NNGDB (Neural Network GDB) v.0.0.1a")
+        print("https://github.com/juvi21/nngdb")
         print("Type 'help' for a list of commands, or 'quit' to exit.")
+        print("Preparing neural spells..")
         
         while True:
             current_experiment = self.debugger.get_current_experiment()
