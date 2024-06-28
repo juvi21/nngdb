@@ -1,7 +1,5 @@
 from typing import List
 from core.debugger import NNGDB
-from advanced.interpretability_metrics import InterpretabilityMetrics
-from advanced.explainability_techniques import ExplainabilityTechniques
 from utils.error_handling import handle_exceptions
 from transformers import AutoTokenizer
 import torch
@@ -17,7 +15,7 @@ class CommandHandler:
         Usage: run <input_text>
         """
         if not args:
-            return "Usage: run <input_text>"
+            return "Error: No input provided. Usage: run <input_text>"
         input_text = " ".join(args)
         return self.debugger.run(input_text)
 
@@ -28,7 +26,7 @@ class CommandHandler:
             method = getattr(self, method_name)
             return method(*args)
         else:
-            return f"Unknown command: {command}"
+            return f"Unknown command: {command}. Type 'help' to see the list of available commands."
     
     @handle_exceptions
     def get_available_commands(self) -> List[str]:
@@ -45,7 +43,7 @@ class CommandHandler:
                 method = getattr(self, method_name)
                 return method.__doc__ or "No help available for this command."
             else:
-                return f"Unknown command: {args[0]}"
+                return f"Unknown command: {args[0]}. Type 'help' to see the list of available commands."
 
     @handle_exceptions
     def cmd_inspect(self, *args):
@@ -55,12 +53,12 @@ class CommandHandler:
         Types: model, layer, weight, activation, gradient
         """
         if len(args) < 1:
-            return "Usage: inspect <type> [<name>]"
+            return "Error: Missing type argument. Usage: inspect <type> [<name>]"
         inspect_type = args[0]
         if inspect_type == "model":
             return self.debugger.inspect_model()
         elif len(args) < 2:
-            return "Usage: inspect <type> <name>"
+            return "Error: Missing name argument. Usage: inspect <type> <name>"
         name = args[1]
         if inspect_type == "layer":
             return self.debugger.inspect_layer(name)
@@ -71,7 +69,7 @@ class CommandHandler:
         elif inspect_type == "gradient":
             return self.debugger.inspect_gradients(name)
         else:
-            return f"Unknown inspection type: {inspect_type}"
+            return f"Unknown inspection type: {inspect_type}. Valid types are: model, layer, weight, activation, gradient."
     
     @handle_exceptions
     def cmd_breakpoint(self, *args):
@@ -82,23 +80,23 @@ class CommandHandler:
                breakpoint list
         """
         if not args:
-            return "Usage: breakpoint <set|remove|list> [<layer_name>] [<condition>]"
+            return "Error: No action specified. Usage: breakpoint <set|remove|list> [<layer_name>] [<condition>]"
         action = args[0]
         if action == "set":
             if len(args) < 2:
-                return "Usage: breakpoint set <layer_name> [<condition>]"
+                return "Error: Missing layer name. Usage: breakpoint set <layer_name> [<condition>]"
             layer_name = args[1]
             condition = " ".join(args[2:]) if len(args) > 2 else None
             return self.debugger.set_breakpoint(layer_name, condition)
         elif action == "remove":
             if len(args) < 2:
-                return "Usage: breakpoint remove <layer_name>"
+                return "Error: Missing layer name. Usage: breakpoint remove <layer_name>"
             layer_name = args[1]
             return self.debugger.remove_breakpoint(layer_name)
         elif action == "list":
             return self.debugger.list_breakpoints()
         else:
-            return f"Unknown breakpoint action: {action}"
+            return f"Unknown breakpoint action: {action}. Valid actions are: set, remove, list."
     
     @handle_exceptions
     def cmd_step(self, *args):
@@ -106,7 +104,10 @@ class CommandHandler:
         Step through execution.
         Usage: step [<num_steps>]
         """
-        num_steps = int(args[0]) if args else 1
+        try:
+            num_steps = int(args[0]) if args else 1
+        except ValueError:
+            return "Error: Invalid number of steps. Usage: step [<num_steps>]"
         return self.debugger.step(num_steps)
 
     @handle_exceptions
@@ -117,7 +118,6 @@ class CommandHandler:
         """
         return self.debugger.continue_execution()
 
-    @handle_exceptions
     @handle_exceptions
     def cmd_modify(self, *args):
         """
@@ -130,14 +130,14 @@ class CommandHandler:
             modify activation model.layers.0.self_attn "x * 2"
         """
         if len(args) < 3:
-            return "Usage: modify <type> <layer_name> <details>"
+            return "Error: Insufficient arguments. Usage: modify <type> <layer_name> <details>"
         
         modify_type = args[0]
         layer_name = args[1]
         
         if modify_type == "weight":
             if len(args) != 5:
-                return "Usage: modify weight <layer_name> <weight_name> <indices> <value>"
+                return "Error: Incorrect number of arguments for weight modification. Usage: modify weight <layer_name> <weight_name> <indices> <value>"
             weight_name = args[2]
             indices = eval(args[3])  # Be careful with eval, ensure proper input validation
             value = float(args[4])
@@ -148,31 +148,56 @@ class CommandHandler:
             return self.debugger.modify_activation(layer_name, function_str)
         
         else:
-            return f"Unknown modification type: {modify_type}"
+            return f"Unknown modification type: {modify_type}. Valid types are: weight, activation."
     
     @handle_exceptions
     def cmd_analyze(self, *args):
         """
-        P   erform analysis on the model.
-        Usage: analyze <type> [<args>]
-        Types: gradients, attention, activations, tokens
+        Perform various analyses on the model.
+        Usage:
+            analyze tokens <input_text> <analysis_type> [options]
+            analyze attention_representation <input_text> [options]
+            analyze gradients [<layer_name>]
+            analyze attention [<layer_name>]
+            analyze activations [<layer_name>]
         """
         if not args:
-            return "Usage: analyze <type> [<args>]"
-        analysis_type = args[0]
-        if analysis_type == "gradients":
-            return self.debugger.gradient_inspector.inspect(args[1] if len(args) > 1 else None)
-        elif analysis_type == "attention":
-            return self.debugger.attention_inspector.inspect(args[1] if len(args) > 1 else None)
-        elif analysis_type == "activations":
-            return self.debugger.activation_inspector.inspect(args[1] if len(args) > 1 else None)
-        elif analysis_type == "tokens":
-            input_text = " ".join(args[1:-1]) if len(args) > 2 and args[-1].isdigit() else " ".join(args[1:])
-            top_k = int(args[-1]) if len(args) > 2 and args[-1].isdigit() else 5
-            return self.debugger.analyze_tokens(input_text, top_k)
+            return "Error: No analysis type provided. Usage: analyze <subcommand> <args>"
+        
+        subcommand = args[0]
+        if subcommand == "tokens":
+            return self._analyze_tokens(args[1:])
+        elif subcommand == "attention_representation":
+            return self._analyze_attention_representation(args[1:])
+        elif subcommand in ["gradients", "attention", "activations"]:
+            return self._analyze_layer(subcommand, args[1:])
         else:
-            return f"Unknown analysis type: {analysis_type}"
-    
+            return f"Unknown analyze subcommand: {subcommand}. Valid subcommands are: tokens, attention_representation, gradients, attention, activations."
+
+    def _analyze_tokens(self, args):
+        if len(args) < 2:
+            return "Error: Insufficient arguments for token analysis. Usage: analyze tokens <input_text> <analysis_type> [options]"
+        input_text = args[0]
+        analysis_type = args[1]
+        options = self._parse_options(args[2:])
+        return self.debugger.analyze_tokens(input_text, analysis_type, **options)
+
+    def _analyze_attention_representation(self, args):
+        if len(args) < 1:
+            return "Error: No input text provided. Usage: analyze attention_representation <input_text> [options]"
+        input_text = args[0]
+        options = self._parse_options(args[1:])
+        return self.debugger.analyze_token_attention_and_representation(input_text, **options)
+
+    def _analyze_layer(self, analysis_type, args):
+        layer_name = args[0] if args else None
+        if analysis_type == "gradients":
+            return self.debugger.gradient_inspector.inspect(layer_name)
+        elif analysis_type == "attention":
+            return self.debugger.attention_inspector.inspect(layer_name)
+        elif analysis_type == "activations":
+            return self.debugger.activation_inspector.inspect(layer_name)
+
     @handle_exceptions
     def cmd_log(self, *args):
         """
@@ -181,7 +206,7 @@ class CommandHandler:
         Actions: info, warning, error, export
         """
         if not args:
-            return "Usage: log <action> [<args>]"
+            return "Error: No action specified. Usage: log <action> [<args>]"
         action = args[0]
         message = " ".join(args[1:])
         if action == "info":
@@ -196,7 +221,7 @@ class CommandHandler:
         elif action == "export":
             return self.debugger.export_logs(message)
         else:
-            return f"Unknown log action: {action}"
+            return f"Unknown log action: {action}. Valid actions are: info, warning, error, export."
 
     @handle_exceptions
     def cmd_python(self, *args):
@@ -209,12 +234,29 @@ class CommandHandler:
     @handle_exceptions
     def cmd_trace(self, *args):
         """
-        Start tracing execution, activations, or gradients.
-        Usage: trace <type>
+        Manage tracing of execution, activations, or gradients.
+        Usage:
+            trace start <type>
+            trace get <type> [<layer_name>]
+            trace clear
         Types: execution, activations, gradients
         """
         if not args:
-            return "Usage: trace <type> (execution, activations, or gradients)"
+            return "Error: No trace action specified. Usage: trace <subcommand> <args>"
+
+        subcommand = args[0]
+        if subcommand == "start":
+            return self._trace_start(args[1:])
+        elif subcommand == "get":
+            return self._trace_get(args[1:])
+        elif subcommand == "clear":
+            return self._trace_clear()
+        else:
+            return f"Unknown trace subcommand: {subcommand}. Valid subcommands are: start, get, clear."
+
+    def _trace_start(self, args):
+        if not args:
+            return "Error: No trace type specified. Usage: trace start <type> (execution, activations, or gradients)"
         trace_type = args[0]
         if trace_type == "execution":
             return self.debugger.trace_execution()
@@ -223,39 +265,27 @@ class CommandHandler:
         elif trace_type == "gradients":
             return self.debugger.trace_gradients()
         else:
-            return f"Unknown trace type: {trace_type}"
-    
-    @handle_exceptions
-    def cmd_get_trace(self, *args):
-        """
-        Get the trace for execution, activations, or gradients.
-        Usage: get_trace <type> [<layer_name>]
-        Types: execution, activations, gradients
-        """
-        if not args:
-            return "Usage: get_trace <type> [<layer_name>]"
+            return f"Unknown trace type: {trace_type}. Valid types are: execution, activations, gradients."
+
+    def _trace_get(self, args):
+        if len(args) < 1:
+            return "Error: No trace type specified. Usage: trace get <type> [<layer_name>]"
         trace_type = args[0]
+        layer_name = args[1] if len(args) > 1 else None
         if trace_type == "execution":
             return self.debugger.get_execution_trace()
         elif trace_type == "activations":
-            if len(args) < 2:
-                return "Usage: get_trace activations <layer_name>"
-            layer_name = args[1]
+            if layer_name is None:
+                return "Error: No layer name specified. Usage: trace get activations <layer_name>"
             return self.debugger.get_activation_trace(layer_name)
         elif trace_type == "gradients":
-            if len(args) < 2:
-                return "Usage: get_trace gradients <layer_name>"
-            layer_name = args[1]
+            if layer_name is None:
+                return "Error: No layer name specified. Usage: trace get gradients <layer_name>"
             return self.debugger.get_gradient_trace(layer_name)
         else:
-            return f"Unknown trace type: {trace_type}"
-    
-    @handle_exceptions
-    def cmd_clear_traces(self, *args):
-        """
-        Clear all traces.
-        Usage: clear_traces
-        """
+            return f"Unknown trace type: {trace_type}. Valid types are: execution, activations, gradients."
+
+    def _trace_clear(self):
         return self.debugger.clear_all_traces()
     
     @handle_exceptions
@@ -265,12 +295,12 @@ class CommandHandler:
         Usage: compare_tokens <index1> <index2>
         """
         if len(args) != 2:
-            return "Usage: compare_tokens <index1> <index2>"
+            return "Error: Incorrect number of indices provided. Usage: compare_tokens <index1> <index2>"
         try:
             index1, index2 = map(int, args)
             return self.debugger.compare_token_probabilities(index1, index2)
         except ValueError:
-            return "Invalid indices. Please provide two integer values."
+            return "Error: Invalid indices. Please provide two integer values."
     
     @handle_exceptions
     def cmd_undo(self, *args):
@@ -295,114 +325,19 @@ class CommandHandler:
         Usage: reset_weights
         """
         return self.debugger.reset_modified_weights()
-
-    @handle_exceptions
-    def cmd_analyze_tokens(self, *args):
-        """
-        Analyze tokens with various methods.
-        Usage: analyze_tokens <input_text> <analysis_type> [options]
-        Analysis types: probabilities, saliency, attention, counterfactual, attribution, neuron_activation, representation_tracking, clustering, importance_ranking
-        Options:
-          --top_k <int>: Number of top tokens to show (for probabilities)
-          --compare_modified: Compare with modified weights (for probabilities)
-          --layer <int>: Layer to analyze (for attention, neuron_activation, clustering)
-          --head <int>: Attention head to analyze (for attention)
-          --token_index <int>: Token to analyze (for counterfactual)
-          --replacements <str1,str2,...>: Replacement tokens (for counterfactual)
-          --method <str>: Attribution method (for attribution)
-          --n_clusters <int>: Number of clusters (for clustering)
-        """
-        if len(args) < 2:
-            return self.cmd_analyze_tokens.__doc__
-
-        # Find the index of the analysis type
-        analysis_type_index = next((i for i, arg in enumerate(args) if arg in ['probabilities', 'saliency', 'attention', 'counterfactual', 'attribution', 'neuron_activation', 'representation_tracking', 'clustering', 'importance_ranking']), None)
-
-        if analysis_type_index is None:
-            return "Invalid analysis type. Please specify a valid analysis type."
-
-        input_text = " ".join(args[:analysis_type_index])
-        analysis_type = args[analysis_type_index]
-        options = self._parse_options(args[analysis_type_index+1:])
-
-        # Convert layer and head to integers if present
-        if 'layer' in options:
-            options['layer'] = int(options['layer'])
-        if 'head' in options:
-            options['head'] = int(options['head'])
-
-        compare_modified = options.pop('compare_modified', False)
-        return self.debugger.analyze_tokens(input_text, analysis_type, compare_modified, **options)
-
-
-    @handle_exceptions
-    def cmd_analyze_token_attention_representation(self, *args):
-        """
-        Analyze token attention and/or representation.
-        Usage: analyze_token_attention_representation <input_text> [options]
-        Options:
-          --layer <int>: Layer to analyze (default: -1)
-          --head <int>: Attention head to analyze (default: None, means all heads)
-          --attention <bool>: Include attention analysis (default: True)
-          --representation <bool>: Include representation analysis (default: True)
-        """
-        if len(args) < 1:
-            return self.cmd_analyze_token_attention_representation.__doc__
-
-        input_text = args[0]
-        options = self._parse_options(args[1:])
-
-        return self.debugger.analyze_token_attention_and_representation(input_text, **options)
-
-    
-    @handle_exceptions
-    def cmd_interpretability(self, *args):
-        """
-        Compute interpretability metrics.
-        Usage: interpretability <metric_name> [<args>]
-        """
-        if not args:
-            return "Usage: interpretability <metric_name> [<args>]"
-        metric_name = args[0]
-        metric_args = args[1:]
-        
-        metrics = InterpretabilityMetrics()
-        if hasattr(metrics, metric_name):
-            method = getattr(metrics, metric_name)
-            return method(self.debugger.wrapped_model.model, *metric_args)
-        else:
-            return f"Unknown metric: {metric_name}"
-    
-    @handle_exceptions
-    def cmd_explainability(self, *args):
-        """
-        Apply explainability techniques.
-        Usage: explainability <technique_name> [<args>]
-        """
-        if not args:
-            return "Usage: explainability <technique_name> [<args>]"
-        technique_name = args[0]
-        technique_args = args[1:]
-        
-        techniques = ExplainabilityTechniques()
-        if hasattr(techniques, technique_name):
-            method = getattr(techniques, technique_name)
-            return method(self.debugger.wrapped_model.model, *technique_args)
-        else:
-            return f"Unknown technique: {technique_name}"
     
     @handle_exceptions
     def cmd_hook(self, *args):
         """
         Manage hooks in the model.
         Usage:
-            <nngdb {hook}> add <forward|backward> <module_name> <hook_name> <hook_function>
-            <nngdb {hook}> remove <hook_name>
-            <nngdb {hook}> list
-            <nngdb {hook}> clear
+            hook add <forward|backward> <module_name> <hook_name> <hook_function>
+            hook remove <hook_name>
+            hook list
+            hook clear
         """
         if not args:
-            return self.cmd_hook.__doc__
+            return "Error: No subcommand specified. Usage: hook <add|remove|list|clear> <args>"
 
         subcommand = args[0]
         if subcommand == "add":
@@ -414,18 +349,18 @@ class CommandHandler:
         elif subcommand == "clear":
             return self._hook_clear()
         else:
-            return f"Unknown hook subcommand: {subcommand}"
+            return f"Unknown hook subcommand: {subcommand}. Valid subcommands are: add, remove, list, clear."
 
     def _hook_add(self, args):
         if len(args) < 4:
-            return "Usage: <nngdb {hook}> add <forward|backward> <module_name> <hook_name> <hook_function>"
+            return "Error: Insufficient arguments for adding hook. Usage: hook add <forward|backward> <module_name> <hook_name> <hook_function>"
         hook_type, module_name, hook_name = args[0], args[1], args[2]
         hook_function = " ".join(args[3:])
         return self.debugger.add_hook(hook_type, module_name, hook_name, hook_function)
 
     def _hook_remove(self, args):
         if not args:
-            return "Usage: <nngdb {hook}> remove <hook_name>"
+            return "Error: No hook name provided. Usage: hook remove <hook_name>"
         hook_name = args[0]
         return self.debugger.remove_hook(hook_name)
 
@@ -468,7 +403,7 @@ class CommandHandler:
             experiment current
         """
         if not args:
-            return self.cmd_experiment.__doc__
+            return "Error: No subcommand specified. Usage: experiment <subcommand> <args>"
 
         subcommand = args[0]
         if subcommand == "create":
@@ -484,7 +419,7 @@ class CommandHandler:
         elif subcommand == "current":
             return self._experiment_current(args[1:])
         else:
-            return f"Unknown experiment subcommand: {subcommand}"
+            return f"Unknown experiment subcommand: {subcommand}. Valid subcommands are: create, switch, list, delete, compare, current."
 
     def _experiment_create(self, args):
         """
@@ -492,7 +427,7 @@ class CommandHandler:
         Usage: experiment create <name>
         """
         if len(args) != 1:
-            return "Usage: experiment create <name>"
+            return "Error: Missing experiment name. Usage: experiment create <name>"
         return self.debugger.create_experiment(args[0])
 
     def _experiment_switch(self, args):
@@ -501,7 +436,7 @@ class CommandHandler:
         Usage: experiment switch <name>
         """
         if len(args) != 1:
-            return "Usage: experiment switch <name>"
+            return "Error: Missing experiment name. Usage: experiment switch <name>"
         return self.debugger.switch_experiment(args[0])
 
     def _experiment_list(self, args):
@@ -520,7 +455,7 @@ class CommandHandler:
         Usage: experiment delete <name>
         """
         if len(args) != 1:
-            return "Usage: experiment delete <name>"
+            return "Error: Missing experiment name. Usage: experiment delete <name>"
         return self.debugger.delete_experiment(args[0])
 
     def _experiment_compare(self, args):
@@ -529,7 +464,7 @@ class CommandHandler:
         Usage: experiment compare <exp1> <exp2> <input_text> [analysis_type] [options]
         """
         if len(args) < 3:
-            return "Usage: experiment compare <exp1> <exp2> <input_text> [analysis_type] [options]"
+            return "Error: Insufficient arguments for comparison. Usage: experiment compare <exp1> <exp2> <input_text> [analysis_type] [options]"
         exp1, exp2 = args[0], args[1]
         input_text = args[2]
         analysis_type = args[3] if len(args) > 3 else 'probabilities'
