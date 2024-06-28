@@ -7,6 +7,24 @@ import torch
 class CommandHandler:
     def __init__(self, debugger: NNGDB):
         self.debugger = debugger
+        self.command_shortforms = {
+            'c': 'continue',
+            'h': 'help',
+            'r': 'run',
+            's': 'step',
+            't': 'trace',
+            'b': 'breakpoint',
+            'a': 'analyze',
+            'i': 'inspect',
+            'm': 'modify',
+            'l': 'log',
+            'p': 'python',
+            'e': 'experiment',
+            'u': 'undo',
+            'd': 'redo',
+            'resetw': 'reset_weights',
+            'ho': 'hook'
+        }
 
     @handle_exceptions
     def cmd_run(self, *args):
@@ -21,12 +39,15 @@ class CommandHandler:
 
     @handle_exceptions
     def handle_command(self, command: str, args: List[str]) -> str:
+        command = self.command_shortforms.get(command, command)
+        
         method_name = f"cmd_{command}"
         if hasattr(self, method_name):
             method = getattr(self, method_name)
             return method(*args)
         else:
             return f"Unknown command: {command}. Type 'help' to see the list of available commands."
+
     
     @handle_exceptions
     def get_available_commands(self) -> List[str]:
@@ -34,9 +55,32 @@ class CommandHandler:
     
     @handle_exceptions
     def cmd_help(self, *args):
+        command_descriptions = {
+            'run': "Run the model with the given input. Usage: run <input_text>",
+            'continue': "Continue execution after hitting a breakpoint. Usage: continue",
+            'step': "Step through execution. Usage: step [<num_steps>]",
+            'trace': "Manage tracing of execution, activations, or gradients. Usage: trace start|get|clear <type> [<layer_name>]",
+            'breakpoint': "Set or remove a breakpoint. Usage: breakpoint set|remove|list <layer_name> [<condition>]",
+            'analyze': "Perform various analyses on the model. Usage: analyze tokens|attention_representation|gradients|attention|activations <args>",
+            'inspect': "Inspect a layer, weight, activation, or gradient. Usage: inspect <type> <name>",
+            'modify': "Modify weights or activations in the model. Usage: modify weight|activation <layer_name> <details>",
+            'log': "Log information or export logs. Usage: log info|warning|error|export <message>",
+            'python': "Enter Python REPL for custom analysis. Usage: python",
+            'experiment': "Manage and compare experiments. Usage: experiment create|switch|list|delete|compare|current <args>",
+            'undo': "Undo the last action. Usage: undo",
+            'redo': "Redo the last undone action. Usage: redo",
+            'reset_weights': "Reset all modified weights to their original values. Usage: reset_weights",
+            'hook': "Manage hooks in the model. Usage: hook add|remove|list|clear <args>",
+            'help': "Show help for commands. Usage: help [<command>]"
+        }
+        
         if not args:
             commands = self.get_available_commands()
-            return "Available commands:\n" + "\n".join(commands)
+            help_text = "Available commands (short forms in parentheses):\n"
+            for cmd in commands:
+                short_form = next((key for key, value in self.command_shortforms.items() if value == cmd), None)
+                help_text += f"{cmd} ({short_form}): {command_descriptions.get(cmd, 'No description available.')}\n"
+            return help_text
         else:
             method_name = f"cmd_{args[0]}"
             if hasattr(self, method_name):
