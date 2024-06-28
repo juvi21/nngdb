@@ -392,47 +392,47 @@ class CommandHandler:
             return f"Unknown technique: {technique_name}"
     
     @handle_exceptions
-    def cmd_add_hook(self, *args):
+    def cmd_hook(self, *args):
         """
-        Add a custom hook to a module.
-        Usage: add_hook <forward|backward> <module_name> <hook_name> <hook_function>
+        Manage hooks in the model.
+        Usage:
+            <nngdb {hook}> add <forward|backward> <module_name> <hook_name> <hook_function>
+            <nngdb {hook}> remove <hook_name>
+            <nngdb {hook}> list
+            <nngdb {hook}> clear
         """
+        if not args:
+            return self.cmd_hook.__doc__
+
+        subcommand = args[0]
+        if subcommand == "add":
+            return self._hook_add(args[1:])
+        elif subcommand == "remove":
+            return self._hook_remove(args[1:])
+        elif subcommand == "list":
+            return self._hook_list()
+        elif subcommand == "clear":
+            return self._hook_clear()
+        else:
+            return f"Unknown hook subcommand: {subcommand}"
+
+    def _hook_add(self, args):
         if len(args) < 4:
-            return "Usage: add_hook <forward|backward> <module_name> <hook_name> <hook_function>"
-        
-        hook_type = args[0]
-        module_name = args[1]
-        hook_name = args[2]
+            return "Usage: <nngdb {hook}> add <forward|backward> <module_name> <hook_name> <hook_function>"
+        hook_type, module_name, hook_name = args[0], args[1], args[2]
         hook_function = " ".join(args[3:])
-        
         return self.debugger.add_hook(hook_type, module_name, hook_name, hook_function)
 
-    @handle_exceptions
-    def cmd_remove_hook(self, *args):
-        """
-        Remove a custom hook.
-        Usage: remove_hook <hook_name>
-        """
-        if len(args) != 1:
-            return "Usage: remove_hook <hook_name>"
-        
+    def _hook_remove(self, args):
+        if not args:
+            return "Usage: <nngdb {hook}> remove <hook_name>"
         hook_name = args[0]
         return self.debugger.remove_hook(hook_name)
-    
-    @handle_exceptions
-    def cmd_list_hooks(self, *args):
-        """
-        List all registered custom hooks.
-        Usage: list_hooks
-        """
+
+    def _hook_list(self):
         return self.debugger.list_hooks()
-    
-    @handle_exceptions
-    def cmd_clear_hooks(self, *args):
-        """
-        Clear all custom hooks.
-        Usage: clear_hooks
-        """
+
+    def _hook_clear(self):
         return self.debugger.clear_hooks()
     
     @handle_exceptions
