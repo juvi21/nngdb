@@ -44,6 +44,8 @@ class NNGDB:
         self.token_analyzer = TokenAnalyzer(self.wrapped_model.model, self.tokenizer, self.device)
 
         self.experiment_manager = ExperimentManager(self.wrapped_model.model)
+        self.experiment_manager.create_experiment("base")
+        self.experiment_manager.switch_experiment("base")
 
     @handle_exceptions
     def compare_token_probabilities(self, index1, index2):

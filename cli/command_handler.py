@@ -475,13 +475,12 @@ class CommandHandler:
         return self.debugger.create_experiment(args[0])
 
     def _experiment_switch(self, args):
-        """
-        Switch to an existing experiment.
-        Usage: experiment switch <name>
-        """
         if len(args) != 1:
             return "Error: Missing experiment name. Usage: experiment switch <name>"
-        return self.debugger.switch_experiment(args[0])
+        result = self.debugger.switch_experiment(args[0])
+        if result.startswith("Experiment"):  # Error message
+            return result
+        return {result}
 
     def _experiment_list(self, args):
         """

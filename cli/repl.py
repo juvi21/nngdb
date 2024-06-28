@@ -18,8 +18,9 @@ class NNGDBREPL:
         print("Type 'help' for a list of commands, or 'quit' to exit.")
         
         while True:
+            current_experiment = self.debugger.get_current_experiment()
             try:
-                user_input = input("<nngdb> ")
+                user_input = input(f"<nngdb:{current_experiment}> ")
                 if user_input.lower() in ['quit', 'exit', 'q']:
                     break
                 self.command_history.append(user_input)
