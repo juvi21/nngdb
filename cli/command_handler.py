@@ -57,15 +57,19 @@ class CommandHandler:
     @handle_exceptions
     def cmd_probe(self, *args):
         """
-        Manage probes in the model.
+        Manage probes and retrieve activations in the model.
         Usage: 
             probe add <point_name> <probe_function>
             probe clear
             probe list
+            probe get <layer_name> <input_text>
+            probe get_multiple <layer1>,<layer2>,... <input_text>
         Examples:
             probe add layers.4.mlp.post_activation "lambda save_ctx, tensor: save_ctx.tensor = tensor"
             probe clear
             probe list
+            probe get layers.4.mlp.post_activation "Hello, world!"
+            probe get_multiple layers.0.mlp.post_activation,layers.1.mlp.post_activation "Hello, world!"
         """
         if not args:
             return "Error: Insufficient arguments. Use 'help probe' for usage information."
@@ -77,8 +81,12 @@ class CommandHandler:
             return self._probe_clear()
         elif action == "list":
             return self._probe_list()
+        elif action == "get":
+            return self._probe_get(args[1:])
+        elif action == "get_multiple":
+            return self._probe_get_multiple(args[1:])
         else:
-            return f"Unknown probe action: {action}. Valid actions are: add, clear, list"
+            return f"Unknown probe action: {action}. Valid actions are: add, clear, list, get, get_multiple"
 
     def _probe_add(self, args):
         if len(args) < 2:
@@ -102,6 +110,23 @@ class CommandHandler:
         if not probes:
             return "No active probes."
         return "\n".join(f"{point}: {func}" for point, func in probes.items())
+
+    def _probe_get(self, args):
+        if len(args) < 2:
+            return "Error: Insufficient arguments. Usage: probe get <layer_name> <input_text>"
+        layer_name, input_text = args[0], " ".join(args[1:])
+        activation = self.debugger.get_activation(layer_name, input_text)
+        return f"Activation for {layer_name}:\n{activation}"
+
+    def _probe_get_multiple(self, args):
+        if len(args) < 2:
+            return "Error: Insufficient arguments. Usage: probe get_multiple <layer1>,<layer2>,... <input_text>"
+        layer_names, input_text = args[0].split(','), " ".join(args[1:])
+        activations = self.debugger.get_multiple_activations(layer_names, input_text)
+        result = "Activations:\n"
+        for layer, activation in activations.items():
+            result += f"{layer}:\n{activation}\n\n"
+        return result
     
     @handle_exceptions
     def cmd_help(self, *args):

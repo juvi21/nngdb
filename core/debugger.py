@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional, List, Callable
 from transformers import AutoTokenizer
 import struct
 import cloudpickle
+from contextlib import contextmanager
 
 from utils.error_handling import handle_exceptions
 from .model_wrapper import ModelWrapper
@@ -331,6 +332,41 @@ class NNGDB:
         if self.socket:
             return self.execute_remote('get_activation_trace', layer_name)
         return self.activation_tracer.get_activation(layer_name)
+    
+    @handle_exceptions
+    def get_activation(self, layer_name: str, input_text: str):
+        if self.socket:
+            return self.execute_remote('get_activation', layer_name, input_text)
+    
+        def capture_activation(save_ctx, tensor):
+            save_ctx.activation = tensor
+
+        self.add_probe(layer_name, capture_activation)
+        self.run(input_text)
+        activation = self.get_recordings()[layer_name].activation
+        self.clear_probes()
+        return activation
+    
+    @contextmanager
+    def temporary_probe(self, layer_name: str, probe_function: Callable):
+        self.add_probe(layer_name, probe_function)
+        try:
+            yield
+        finally:
+            self.clear_probes()
+    
+    @handle_exceptions
+    def get_multiple_activations(self, layer_names: List[str], input_text: str):
+        if self.socket:
+            return self.execute_remote('get_multiple_activations', layer_names, input_text)
+    
+        for layer_name in layer_names:
+            self.add_probe(layer_name, lambda save_ctx, tensor: setattr(save_ctx, 'activation', tensor))
+    
+        self.run(input_text)
+        activations = {layer: self.get_recordings()[layer].activation for layer in layer_names}
+        self.clear_probes()
+        return activations
     
     @handle_exceptions
     def get_execution_trace(self):
