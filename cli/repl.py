@@ -60,3 +60,13 @@ class NNGDBREPL:
         """
         n = int(args[0]) if args else len(self.command_history)
         return "\n".join(self.command_history[-n:])
+    
+    def cmd_connect(self, *args):
+        """
+        Connect to a running NNGDB server.
+        Usage: connect [host] [port]
+        """
+        host = args[0] if len(args) > 0 else 'localhost'
+        port = int(args[1]) if len(args) > 1 else 5000
+        self.debugger.connect(host, port)
+        return f"Connected to NNGDB server at {host}:{port}"

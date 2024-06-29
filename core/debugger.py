@@ -4,6 +4,7 @@ from transformers import AutoTokenizer
 import struct
 import cloudpickle
 from contextlib import contextmanager
+import traceback
 
 from utils.error_handling import handle_exceptions
 from .model_wrapper import ModelWrapper
@@ -14,6 +15,7 @@ from tracing import ExecutionTracer, ActivationTracer, GradientTracer
 from analysis.token_probability import TokenProbabilityAnalyzer
 from analysis.token_analyzer import TokenAnalyzer
 from analysis.probe import ProbeManager, probe_decorator, ProbePoint
+from analysis.dataset_example_collector import DatasetExampleCollector
 from core.undo_manager import UndoManager
 from advanced.custom_hooks import CustomHookManager
 from experiments.experiment_manager import ExperimentManager
@@ -57,6 +59,7 @@ class NNGDB:
         self.probe_manager = ProbeManager()
         self.active_probes = []
         self._register_probe_points()
+        self.dataset_example_collector = DatasetExampleCollector()
 
     def _initialize_dummy_components(self):
         self.wrapped_model = None
@@ -80,6 +83,7 @@ class NNGDB:
         self.experiment_manager = None
         self.probe_manager = None
         self.active_probes = []
+        self.dataset_example_collector = None
 
     def _register_probe_points(self):
         if self.wrapped_model is not None:
@@ -574,3 +578,28 @@ class NNGDB:
         if self.socket:
             return lambda *args, **kwargs: self.execute_remote(name, *args, **kwargs)
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+    
+    @handle_exceptions
+    def collect_dataset_examples(self, input_texts: List[str], layer_names: List[str], top_n: int = 10):
+        if self.socket:
+            return self.execute_remote('collect_dataset_examples', input_texts, layer_names, top_n)
+
+        self.dataset_example_collector.clear()
+        self.dataset_example_collector.num_top_examples = top_n
+
+        def activation_hook(module, input, output):
+            try:
+                layer_name = next(name for name, mod in self.wrapped_model.model.named_modules() if mod is module)
+                if layer_name in layer_names:
+                    # Assuming input is a tuple and the first element is the input_ids
+                    input_ids = input[0] if isinstance(input, tuple) else input
+                    if isinstance(input_ids, torch.Tensor):
+                        input_ids = input_ids.squeeze().tolist()
+                    tokens = self.tokenizer.convert_ids_to_tokens(input_ids)
+                    if isinstance(tokens, str):
+                        tokens = [tokens]  # Ensure tokens is always a list
+                    print(f"Debug - Layer: {layer_name}, Tokens: {tokens}, Output shape: {output.shape}")
+                    self.dataset_example_collector.collect_activations(layer_name, output[0], tokens)
+            except Exception as e:
+                print(f"Error in activation_hook: {str(e)}")
+                print(traceback.format_exc())

@@ -1,6 +1,6 @@
 import socket
 import threading
-import pickle
+import cloudpickle
 import struct
 from core.debugger import NNGDB
 import torch
@@ -39,9 +39,9 @@ class NNGDBServer:
                 data = self.recv_msg(client_socket)
                 if not data:
                     break
-                command = pickle.loads(data)
+                command = cloudpickle.loads(data)
                 result = self.execute_command(command)
-                self.send_msg(client_socket, pickle.dumps(result))
+                self.send_msg(client_socket, cloudpickle.dumps(result))
             except Exception as e:
                 print(f"Error handling client {addr}: {e}")
                 break
@@ -54,21 +54,17 @@ class NNGDBServer:
             return method(*command['args'], **command['kwargs'])
 
     def send_msg(self, sock, msg):
-        # Prefix each message with a 4-byte length (network byte order)
         msg = struct.pack('>I', len(msg)) + msg
         sock.sendall(msg)
 
     def recv_msg(self, sock):
-        # Read message length and unpack it into an integer
         raw_msglen = self.recvall(sock, 4)
         if not raw_msglen:
             return None
         msglen = struct.unpack('>I', raw_msglen)[0]
-        # Read the message data
         return self.recvall(sock, msglen)
 
     def recvall(self, sock, n):
-        # Helper function to recv n bytes or return None if EOF is hit
         data = bytearray()
         while len(data) < n:
             packet = sock.recv(n - len(data))

@@ -273,16 +273,17 @@ class CommandHandler:
     def cmd_analyze(self, *args):
         """
         Perform various analyses on the model.
-        Usage:
+         Usage:
             analyze tokens <input_text> <analysis_type> [options]
             analyze attention_representation <input_text> [options]
             analyze gradients [<layer_name>]
             analyze attention [<layer_name>]
             analyze activations [<layer_name>]
+            analyze dataset_examples (<input_file> | --inline) <layer1> [<layer2> ...] [--top <n>] [--neuron <idx>]
         """
         if not args:
             return "Error: No analysis type provided. Usage: analyze <subcommand> <args>"
-        
+    
         subcommand = args[0]
         if subcommand == "tokens":
             return self._analyze_tokens(args[1:])
@@ -290,9 +291,12 @@ class CommandHandler:
             return self._analyze_attention_representation(args[1:])
         elif subcommand in ["gradients", "attention", "activations"]:
             return self._analyze_layer(subcommand, args[1:])
+        elif subcommand == "dataset_examples":
+            return self._analyze_dataset_examples(args[1:])
         else:
-            return f"Unknown analyze subcommand: {subcommand}. Valid subcommands are: tokens, attention_representation, gradients, attention, activations."
-
+            return f"Unknown analyze subcommand: {subcommand}. Valid subcommands are: tokens, attention_representation, gradients, attention, activations, dataset_examples."    
+    
+    @handle_exceptions
     def _analyze_tokens(self, args):
         if len(args) < 2:
             return "Error: Insufficient arguments for token analysis. Usage: analyze tokens <input_text> <analysis_type> [options]"
@@ -539,7 +543,8 @@ class CommandHandler:
             return self._experiment_current(args[1:])
         else:
             return f"Unknown experiment subcommand: {subcommand}. Valid subcommands are: create, switch, list, delete, compare, current."
-
+    
+    @handle_exceptions
     def _experiment_create(self, args):
         """
         Create a new experiment.
@@ -549,6 +554,7 @@ class CommandHandler:
             return "Error: Missing experiment name. Usage: experiment create <name>"
         return self.debugger.create_experiment(args[0])
 
+    @handle_exceptions
     def _experiment_switch(self, args):
         if len(args) != 1:
             return "Error: Missing experiment name. Usage: experiment switch <name>"
@@ -557,6 +563,7 @@ class CommandHandler:
             return result
         return {result}
 
+    @handle_exceptions
     def _experiment_list(self, args):
         """
         List all available experiments.
@@ -567,6 +574,7 @@ class CommandHandler:
             return "No experiments available."
         return "Available experiments:\n" + "\n".join(experiments)
 
+    @handle_exceptions
     def _experiment_delete(self, args):
         """
         Delete an existing experiment.
@@ -576,6 +584,7 @@ class CommandHandler:
             return "Error: Missing experiment name. Usage: experiment delete <name>"
         return self.debugger.delete_experiment(args[0])
 
+    @handle_exceptions
     def _experiment_compare(self, args):
         """
         Compare two experiments.
@@ -589,6 +598,7 @@ class CommandHandler:
         options = self._parse_options(args[4:])
         return self.debugger.compare_experiments(exp1, exp2, input_text, analysis_type, **options)
 
+    @handle_exceptions
     def _experiment_current(self, args):
         """
         Show the current active experiment.
@@ -596,3 +606,85 @@ class CommandHandler:
         """
         current_exp = self.debugger.get_current_experiment()
         return f"Current experiment: {current_exp}" if current_exp else "No active experiment."
+
+    @handle_exceptions
+    def _analyze_dataset_examples(self, args):
+        if len(args) < 2:
+            return "Error: Insufficient arguments. Usage: analyze dataset_examples (--inline | <input_file>) <layer1> [<layer2> ...] [--top <n>] [--neuron <idx>]"
+
+        inline_mode = False
+        input_source = None
+        layer_names = []
+        top_n = 10
+        neuron_idx = None
+
+        i = 0
+        while i < len(args):
+            if args[i] == '--inline':
+                inline_mode = True
+                i += 1
+            elif args[i] == '--top':
+                top_n = int(args[i+1])
+                i += 2
+            elif args[i] == '--neuron':
+                neuron_idx = int(args[i+1])
+                i += 2
+            elif input_source is None and not inline_mode:
+                input_source = args[i]
+                i += 1
+            else:
+                layer_names.append(args[i])
+                i += 1
+
+        if inline_mode:
+            input_texts = self._get_inline_dataset()
+        elif input_source:
+            try:
+                with open(input_source, 'r') as f:
+                    input_texts = f.readlines()
+            except FileNotFoundError:
+                return f"Error: Input file '{input_source}' not found."
+        else:
+            return "Error: No input source specified. Use --inline or provide an input file."
+
+        result = self.debugger.collect_dataset_examples(input_texts, layer_names, top_n)
+        
+        if neuron_idx is not None:
+            return self._format_neuron_examples(result, layer_names, neuron_idx)
+        else:
+            return self._format_layer_examples(result, layer_names)
+    
+    @handle_exceptions
+    def _get_inline_dataset(self):
+        print("Enter your dataset examples. Type 'END' on a new line when finished:")
+        examples = []
+        while True:
+            line = input()
+            if line.strip().upper() == 'END':
+                break
+            examples.append(line)
+        return examples
+
+    @handle_exceptions
+    def _format_neuron_examples(self, result, layer_names, neuron_idx):
+        formatted = ""
+        for layer in layer_names:
+            if layer in result and neuron_idx < len(result[layer]):
+                formatted += f"Top examples for layer '{layer}', neuron {neuron_idx}:\n"
+                for activation, token in result[layer][neuron_idx]:
+                    formatted += f"  {token}: {activation:.4f}\n"
+            else:
+                formatted += f"No examples found for layer '{layer}', neuron {neuron_idx}\n"
+        return formatted
+
+    @handle_exceptions
+    def _format_layer_examples(self, result, layer_names):
+        formatted = ""
+        for layer in layer_names:
+            if layer in result:
+                formatted += f"Top activated neurons for layer '{layer}':\n"
+                for neuron_idx, (activation, token) in enumerate(result[layer]):
+                    formatted += f"  Neuron {neuron_idx}: {token} ({activation:.4f})\n"
+            else:
+                formatted += f"No examples found for layer '{layer}'\n"
+        return formatted

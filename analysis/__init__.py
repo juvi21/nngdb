@@ -5,6 +5,7 @@ from .perturbation_analysis import PerturbationAnalyzer
 from .token_probability import TokenProbabilityAnalyzer
 from .token_analyzer import TokenAnalyzer
 from .probe import ProbeManager, ProbePoint, probe_decorator
+from .dataset_example_collector import DatasetExampleCollector
 
 __all__ = [
     'GradientFlowAnalyzer',
@@ -16,4 +17,5 @@ __all__ = [
     'ProbeManager',
     'ProbePoint',
     'probe_decorator'
+    'DatasetExampleCollector'
 ]
