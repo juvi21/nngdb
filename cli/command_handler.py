@@ -3,6 +3,7 @@ from core.debugger import NNGDB
 from utils.error_handling import handle_exceptions
 from transformers import AutoTokenizer
 import torch
+import cloudpickle
 
 class CommandHandler:
     def __init__(self, debugger: NNGDB):
@@ -23,7 +24,8 @@ class CommandHandler:
             'u': 'undo',
             'd': 'redo',
             'resetw': 'reset_weights',
-            'ho': 'hook'
+            'ho': 'hook',
+            'pr': 'probe'
         }
 
     @handle_exceptions
@@ -48,10 +50,58 @@ class CommandHandler:
         else:
             return f"Unknown command: {command}. Type 'help' to see the list of available commands."
 
-    
     @handle_exceptions
     def get_available_commands(self) -> List[str]:
         return [method[4:] for method in dir(self) if method.startswith("cmd_")]
+
+    @handle_exceptions
+    def cmd_probe(self, *args):
+        """
+        Manage probes in the model.
+        Usage: 
+            probe add <point_name> <probe_function>
+            probe clear
+            probe list
+        Examples:
+            probe add layers.4.mlp.post_activation "lambda save_ctx, tensor: save_ctx.tensor = tensor"
+            probe clear
+            probe list
+        """
+        if not args:
+            return "Error: Insufficient arguments. Use 'help probe' for usage information."
+
+        action = args[0]
+        if action == "add":
+            return self._probe_add(args[1:])
+        elif action == "clear":
+            return self._probe_clear()
+        elif action == "list":
+            return self._probe_list()
+        else:
+            return f"Unknown probe action: {action}. Valid actions are: add, clear, list"
+
+    def _probe_add(self, args):
+        if len(args) < 2:
+            return "Error: Insufficient arguments. Usage: probe add <point_name> <probe_function>"
+        
+        point_name = args[0]
+        probe_function = " ".join(args[1:])
+        
+        try:
+            probe_func = cloudpickle.loads(cloudpickle.dumps(eval(f"lambda save_ctx, tensor: {probe_function}")))
+        except Exception as e:
+            return f"Error creating probe function: {str(e)}"
+
+        return self.debugger.add_probe(point_name, probe_func)
+
+    def _probe_clear(self):
+        return self.debugger.clear_probes()
+
+    def _probe_list(self):
+        probes = self.debugger.list_probes()
+        if not probes:
+            return "No active probes."
+        return "\n".join(f"{point}: {func}" for point, func in probes.items())
     
     @handle_exceptions
     def cmd_help(self, *args):

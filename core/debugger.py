@@ -1,7 +1,8 @@
 import torch
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List, Callable
 from transformers import AutoTokenizer
 import struct
+import cloudpickle
 
 from utils.error_handling import handle_exceptions
 from .model_wrapper import ModelWrapper
@@ -11,6 +12,7 @@ from breakpoints import BreakpointManager
 from tracing import ExecutionTracer, ActivationTracer, GradientTracer
 from analysis.token_probability import TokenProbabilityAnalyzer
 from analysis.token_analyzer import TokenAnalyzer
+from analysis.probe import ProbeManager, probe_decorator, ProbePoint
 from core.undo_manager import UndoManager
 from advanced.custom_hooks import CustomHookManager
 from experiments.experiment_manager import ExperimentManager
@@ -51,9 +53,11 @@ class NNGDB:
         self.experiment_manager = ExperimentManager(self.wrapped_model.model)
         self.experiment_manager.create_experiment("base")
         self.experiment_manager.switch_experiment("base")
+        self.probe_manager = ProbeManager()
+        self.active_probes = []
+        self._register_probe_points()
 
     def _initialize_dummy_components(self):
-        # Initialize dummy components or set to None for remote execution
         self.wrapped_model = None
         self.execution_engine = None
         self.breakpoint_manager = None
@@ -73,6 +77,13 @@ class NNGDB:
         self.token_analyzer = None
         self.custom_hook_manager = None
         self.experiment_manager = None
+        self.probe_manager = None
+        self.active_probes = []
+
+    def _register_probe_points(self):
+        if self.wrapped_model is not None:
+            for name, _ in self.wrapped_model.model.named_modules():
+                self.probe_manager.register_probe_point(name)
 
     @handle_exceptions
     def connect(self, host='localhost', port=5000):
@@ -88,8 +99,8 @@ class NNGDB:
             'args': args,
             'kwargs': kwargs
         }
-        self.send_msg(pickle.dumps(command))
-        return pickle.loads(self.recv_msg())
+        self.send_msg(cloudpickle.dumps(command))
+        return cloudpickle.loads(self.recv_msg())
 
     @handle_exceptions
     def send_msg(self, msg):
@@ -114,8 +125,8 @@ class NNGDB:
             data.extend(packet)
         return data
 
-
     @handle_exceptions
+    @probe_decorator
     def run(self, input_text: str):
         if self.socket:
             return self.execute_remote('run', input_text)
@@ -141,9 +152,83 @@ class NNGDB:
 
             output_text = self.tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
-            return f"Input: {input_text}\nOutput: {output_text}"
+            recordings = self.get_recordings()
+            return f"Input: {input_text}\nOutput: {output_text}\nProbe recordings: {recordings}"
         except Exception as e:
             return f"Error: {str(e)}\nError type: {type(e)}"
+
+    @handle_exceptions
+    @probe_decorator
+    def step(self, num_steps: int = 1):
+        if self.socket:
+            return self.execute_remote('step', num_steps)
+        result = self.execution_engine.step(num_steps)
+        recordings = self.get_recordings()
+        return f"{result}\nProbe recordings: {recordings}"
+
+    @handle_exceptions
+    def set_breakpoint(self, layer_name: str, condition: str = None):
+        if self.socket:
+            return self.execute_remote('set_breakpoint', layer_name, condition)
+        result = self.breakpoint_manager.set_breakpoint(layer_name, condition)
+        self.probe_point(layer_name).probe(lambda save_ctx, tensor: setattr(save_ctx, 'breakpoint_tensor', tensor))
+        return result
+
+    @handle_exceptions
+    def trace_execution(self):
+        if self.socket:
+            return self.execute_remote('trace_execution')
+        self.execution_tracer.trace()
+        for layer_name in self.execution_tracer.traced_layers:
+            self.probe_point(layer_name).probe(lambda save_ctx, tensor: setattr(save_ctx, 'traced_tensor', tensor))
+        return "Execution tracing enabled with probes. Run the model to collect the trace."
+
+    @handle_exceptions
+    def get_recordings(self):
+        if self.socket:
+            return self.execute_remote('get_recordings')
+        return self.probe_manager.recordings
+
+    @handle_exceptions
+    def clear_recordings(self):
+        if self.socket:
+            return self.execute_remote('clear_recordings')
+        self.probe_manager.clear_recordings()
+
+    @handle_exceptions
+    def probe_point(self, name: str) -> Optional[ProbePoint]:
+        if self.socket:
+            return self.execute_remote('probe_point', name)
+        point = self.probe_manager.get_probe_point(name)
+        if point is None:
+            print(f"Warning: Probe point '{name}' not found. Available probe points: {', '.join(self.probe_manager.probe_points.keys())}")
+        return point
+
+    @handle_exceptions
+    def add_probe(self, point_name: str, probe_function: Callable):
+        if self.socket:
+            return self.execute_remote('add_probe', point_name, probe_function)
+        probe_point = self.probe_point(point_name)
+        if probe_point is None:
+            return f"Error: Probe point '{point_name}' not found. Make sure the model is initialized and the layer name is correct."
+        probe_point.probe(probe_function)
+        self.active_probes.append(probe_point)
+        return f"Probe added to {point_name}"
+
+    @handle_exceptions
+    def clear_probes(self):
+        if self.socket:
+            return self.execute_remote('clear_probes')
+        for probe_point in self.active_probes:
+            probe_point.clear()
+        self.active_probes.clear()
+        return "All probes cleared"
+
+    @handle_exceptions
+    def list_probes(self):
+        if self.socket:
+            return self.execute_remote('list_probes')
+        return {probe.name: str(probe.hooks[0]) for probe in self.active_probes}
 
     @handle_exceptions
     def set_context(self, key: str, value: Any):
@@ -230,12 +315,6 @@ class NNGDB:
         return self.breakpoint_manager.list_breakpoints()
 
     @handle_exceptions
-    def trace_execution(self):
-        if self.socket:
-            return self.execute_remote('trace_execution')
-        return self.execution_tracer.trace()
-
-    @handle_exceptions
     def trace_activations(self):
         if self.socket:
             return self.execute_remote('trace_activations')
@@ -267,12 +346,6 @@ class NNGDB:
         self.activation_tracer.clear_trace()
         self.gradient_tracer.clear_trace()
         return "All traces cleared."
-    
-    @handle_exceptions
-    def step(self, num_steps: int = 1):
-        if self.socket:
-            return self.execute_remote('step', num_steps)
-        return self.execution_engine.step(num_steps)
     
     @handle_exceptions
     def continue_execution(self):

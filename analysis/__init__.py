@@ -4,5 +4,16 @@ from .neuron_activation import NeuronActivationAnalyzer
 from .perturbation_analysis import PerturbationAnalyzer
 from .token_probability import TokenProbabilityAnalyzer
 from .token_analyzer import TokenAnalyzer
+from .probe import ProbeManager, ProbePoint, probe_decorator
 
-__all__ = ['GradientFlowAnalyzer', 'AttentionAnalyzer', 'NeuronActivationAnalyzer', 'PerturbationAnalyzer', 'TokenProbabilityAnalyzer', 'TokenAnalyzer']
+__all__ = [
+    'GradientFlowAnalyzer',
+    'AttentionAnalyzer',
+    'NeuronActivationAnalyzer',
+    'PerturbationAnalyzer',
+    'TokenProbabilityAnalyzer',
+    'TokenAnalyzer',
+    'ProbeManager',
+    'ProbePoint',
+    'probe_decorator'
+]
