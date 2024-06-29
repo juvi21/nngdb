@@ -1,5 +1,5 @@
 import torch
-from typing import Any, Dict, Optional, List, Callable
+from typing import Any, Dict, Optional, List, Callable, Tuple
 from transformers import AutoTokenizer
 import struct
 import cloudpickle
@@ -12,15 +12,22 @@ from .execution_engine import ExecutionEngine
 from inspection import ModelInspector, LayerInspector, WeightInspector, ActivationInspector, GradientInspector, AttentionInspector, VariableInspector
 from breakpoints import BreakpointManager
 from tracing import ExecutionTracer, ActivationTracer, GradientTracer
-from analysis.token_probability import TokenProbabilityAnalyzer
-from analysis.token_analyzer import TokenAnalyzer
+from inspection.token_inspector import TokenInspector
+from analysis.token_analysis import (
+    TokenAttentionVisualizer,
+    TokenNeuronAnalyzer,
+    TokenGradientTracker,
+    TokenActivationComparator,
+    TokenAnalyzer,
+    TokenProbabilityAnalyzer
+)
+
 from analysis.probe import ProbeManager, probe_decorator, ProbePoint
 from analysis.dataset_example_collector import DatasetExampleCollector
 from core.undo_manager import UndoManager
 from advanced.custom_hooks import CustomHookManager
 from experiments.experiment_manager import ExperimentManager
 import socket
-import pickle
 
 class NNGDB:
     def __init__(self, model: Optional[torch.nn.Module], model_name: str, device: str):
@@ -60,6 +67,17 @@ class NNGDB:
         self.active_probes = []
         self._register_probe_points()
         self.dataset_example_collector = DatasetExampleCollector()
+        self.tracing_enabled = False
+        self.token_inspector = TokenInspector(self.wrapped_model, self.tokenizer)
+        self.token_attention_visualizer = TokenAttentionVisualizer(self.wrapped_model, self.tokenizer)
+        self.token_neuron_analyzer = TokenNeuronAnalyzer(self.wrapped_model, self.tokenizer)
+        self.token_gradient_tracker = TokenGradientTracker(self.wrapped_model, self.tokenizer)
+        self.token_activation_comparator = TokenActivationComparator(self.wrapped_model, self.tokenizer)
+        self.token_analyzer = TokenAnalyzer(self.wrapped_model.model, self.tokenizer, self.device)
+        self.token_probability_analyzer = TokenProbabilityAnalyzer(self.wrapped_model.model, self.get_context('tokenizer'))
+        self.last_input_text = None
+        self.last_output = None
+
 
     def _initialize_dummy_components(self):
         self.wrapped_model = None
@@ -84,6 +102,16 @@ class NNGDB:
         self.probe_manager = None
         self.active_probes = []
         self.dataset_example_collector = None
+        self.tracing_enabled = False
+        self.last_input_text = None
+        self.token_inspector = None
+        self.token_attention_visualizer = None
+        self.token_neuron_analyzer = None
+        self.token_gradient_tracker = None
+        self.token_activation_comparator = None
+        self.token_analyzer = None
+        self.token_probability_analyzer = None
+        self.last_output = None
 
     def _register_probe_points(self):
         if self.wrapped_model is not None:
@@ -136,16 +164,22 @@ class NNGDB:
         if self.socket:
             return self.execute_remote('run', input_text)
         try:
+            self.last_input_text = input_text  # Store the input text
             inputs = self.tokenizer(input_text, return_tensors="pt").to(self.device)
             print(f"Input shape: {inputs.input_ids.shape}")
 
+            if self.tracing_enabled:
+                self.execution_tracer.clear_trace()
+                self.execution_tracer.trace()
+
             with torch.no_grad():
                 outputs = self.wrapped_model.model(**inputs)
+                self.last_output = outputs
 
             print(f"Output type: {type(outputs)}")
             if hasattr(outputs, 'logits'):
                 print(f"Logits shape: {outputs.logits.shape}")
-            
+        
             if hasattr(outputs, 'logits'):
                 output_ids = outputs.logits[:, -1:].argmax(dim=-1)
             elif isinstance(outputs, tuple):
@@ -157,10 +191,22 @@ class NNGDB:
 
             output_text = self.tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
+            if self.tracing_enabled:
+                input_ids = inputs.input_ids[0].tolist()
+                print(f"Input IDs: {input_ids}")  # Debug print
+                for position, token_id in enumerate(input_ids):
+                    token = self.tokenizer.decode([token_id])
+                    print(f"Tracing token: {token} (ID: {token_id}) at position: {position}")  # Debug print
+                    self.trace_token(token, position)
+
             recordings = self.get_recordings()
             return f"Input: {input_text}\nOutput: {output_text}\nProbe recordings: {recordings}"
         except Exception as e:
+            import traceback
+            print(f"Error in run method: {str(e)}")
+            print(traceback.format_exc())
             return f"Error: {str(e)}\nError type: {type(e)}"
+
 
     @handle_exceptions
     @probe_decorator
@@ -187,6 +233,30 @@ class NNGDB:
         for layer_name in self.execution_tracer.traced_layers():
             self.probe_point(layer_name).probe(lambda save_ctx, tensor: setattr(save_ctx, 'traced_tensor', tensor))
         return "Execution tracing enabled with probes. Run the model to collect the trace."
+    
+    @handle_exceptions
+    @probe_decorator
+    def trace_token(self, token: str, position: int):
+        if self.socket:
+            return self.execute_remote('trace_token', token, position)
+        input_ids = self.tokenizer.encode(token, add_special_tokens=False)
+        if not input_ids:
+            return f"Error: '{token}' could not be tokenized."
+        token_id = input_ids[0]
+        self.execution_tracer.trace_token(token_id, position)
+        return f"Token '{token}' traced at position {position}. Use 'trace follow {token}' to view the results."
+
+    @handle_exceptions
+    @probe_decorator
+    def get_token_trace(self, token: str):
+        if self.socket:
+            return self.execute_remote('get_token_trace', token)
+        input_ids = self.tokenizer.encode(token, add_special_tokens=False)
+        if not input_ids:
+            return f"Error: '{token}' could not be tokenized."
+        token_id = input_ids[0]
+        return self.execution_tracer.get_token_trace(token_id)
+
 
     @handle_exceptions
     def get_recordings(self):
@@ -580,10 +650,7 @@ class NNGDB:
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
     
     @handle_exceptions
-    def collect_dataset_examples(self, input_texts: List[str], layer_names: List[str], top_n: int = 10):
-        if self.socket:
-            return self.execute_remote('collect_dataset_examples', input_texts, layer_names, top_n)
-
+    def collect_dataset_examples(self, input_texts: List[str], layer_names: List[str], top_n: int = 10) -> Dict[str, List[List[Tuple[float, str]]]]:
         self.dataset_example_collector.clear()
         self.dataset_example_collector.num_top_examples = top_n
 
@@ -603,3 +670,93 @@ class NNGDB:
             except Exception as e:
                 print(f"Error in activation_hook: {str(e)}")
                 print(traceback.format_exc())
+
+        # Register hooks for the specified layers
+        handles = []
+        for name, module in self.wrapped_model.model.named_modules():
+            if any(layer_name in name for layer_name in layer_names):
+                handles.append(module.register_forward_hook(activation_hook))
+
+        # Process each input text
+        for text in input_texts:
+            input_ids = self.tokenizer.encode(text, return_tensors="pt").to(self.device)
+            with torch.no_grad():
+                self.wrapped_model.model(input_ids)
+
+        # Remove the hooks
+        for handle in handles:
+            handle.remove()
+
+        # Collect results
+        results = {}
+        for layer_name in layer_names:
+            results[layer_name] = self.dataset_example_collector.get_top_examples(layer_name)
+
+        return results
+    
+    @handle_exceptions
+    def get_token_activation(self, layer_name, token):
+        if self.last_output is None:
+            return "No model output available. Run the model first."
+        return self.token_inspector.get_token_activation(layer_name, token, self.last_output)
+
+
+    @handle_exceptions
+    def get_position_activation(self, layer_name, position):
+        return self.token_inspector.get_position_activation(layer_name, position)
+
+    @handle_exceptions
+    def get_token_gradient(self, layer_name, token):
+        return self.token_inspector.get_token_gradient(layer_name, token)
+
+    @handle_exceptions
+    def visualize_token_attention(self, token, layer=None):
+        return self.token_attention_visualizer.visualize_token_attention(token, layer)
+
+    @handle_exceptions
+    def analyze_token_neuron_activation(self, token, layer, top_n=10):
+        return self.token_neuron_analyzer.analyze_token_neuron_activation(token, layer, top_n)
+
+    @handle_exceptions
+    def track_token_gradient(self, token, layers=None):
+        return self.token_gradient_tracker.track_token_gradient(token, layers)
+
+    @handle_exceptions
+    def compare_token_activations(self, token1, token2, layers=None):
+        return self.token_activation_comparator.compare_token_activations(token1, token2, layers)
+    
+    @handle_exceptions
+    def compare_token_probabilities(self, tokens, input_text=None):
+        if input_text is None:
+            # Use the last input if no new input is provided
+            input_text = self.last_input_text
+        
+        if input_text is None:
+            return "Error: No input text provided or available from previous run."
+        
+        probabilities = self.token_probability_analyzer.analyze(input_text)
+        
+        result = f"Token probability comparison for input: '{input_text}'\n\n"
+        for token in tokens:
+            if token in probabilities:
+                result += f"'{token}': {probabilities[token]:.6f}\n"
+            else:
+                result += f"'{token}': Not found in the output distribution\n"
+        
+        return result
+
+    @handle_exceptions
+    def analyze_token_probabilities(self, tokens, input_text):
+        if input_text is None:
+            return "Error: No input text provided."
+        
+        probabilities = self.token_probability_analyzer.analyze(input_text)
+        
+        result = f"Token probability analysis for input: '{input_text}'\n\n"
+        for token in tokens:
+            if token in probabilities:
+                result += f"'{token}': {probabilities[token]:.6f}\n"
+            else:
+                result += f"'{token}': Not found in the output distribution\n"
+        
+        return result

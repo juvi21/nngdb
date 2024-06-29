@@ -8,14 +8,10 @@ class ActivationTracer:
 
     def trace(self):
         def hook(module, input, output):
-            self.activation_trace[module.__class__.__name__] = output.detach()
-
-        for name, module in self.wrapped_model.model.named_modules():
-            module.register_forward_hook(hook)
-
-    def _register_hooks(self):
-        def hook(module, input, output):
-            self.activation_trace[module.__class__.__name__] = output.detach() if isinstance(output, torch.Tensor) else output
+            if isinstance(output, torch.Tensor):
+                self.activation_trace[module.__class__.__name__] = output.detach()
+            else:
+                self.activation_trace[module.__class__.__name__] = output
 
         for name, module in self.wrapped_model.model.named_modules():
             module.register_forward_hook(hook)
@@ -29,6 +25,9 @@ class ActivationTracer:
     def clear_trace(self):
         self.activation_trace = {}
         return "Activation trace cleared."
+
+    def get_activated_layers(self):
+        return list(self.activation_trace.keys())
 
     def summarize_trace(self):
         summary = []

@@ -137,7 +137,7 @@ class CommandHandler:
             'trace': "Manage tracing of execution, activations, or gradients. Usage: trace start|get|clear <type> [<layer_name>]",
             'breakpoint': "Set or remove a breakpoint. Usage: breakpoint set|remove|list <layer_name> [<condition>]",
             'analyze': "Perform various analyses on the model. Usage: analyze tokens|attention_representation|gradients|attention|activations <args>",
-            'inspect': "Inspect a layer, weight, activation, or gradient. Usage: inspect <type> <name>",
+            'inspect': "Inspect various aspects of the model (model, layer, weight, activation, gradient).",
             'modify': "Modify weights or activations in the model. Usage: modify weight|activation <layer_name> <details>",
             'log': "Log information or export logs. Usage: log info|warning|error|export <message>",
             'python': "Enter Python REPL for custom analysis. Usage: python",
@@ -167,28 +167,47 @@ class CommandHandler:
     @handle_exceptions
     def cmd_inspect(self, *args):
         """
-        Inspect a layer, weight, activation, or gradient.
-        Usage: inspect <type> <name>
-        Types: model, layer, weight, activation, gradient
+        Inspect various aspects of the model.
+        Usage: 
+            inspect model
+            inspect layer <layer_name>
+            inspect weight <layer_name> <weight_name>
+            inspect activation <layer_name> [--token <token> | --position <pos>]
+            inspect gradient <layer_name> [--token <token>]
         """
         if len(args) < 1:
-            return "Error: Missing type argument. Usage: inspect <type> [<name>]"
+            return "Error: Missing arguments. Use 'help inspect' for usage information."
+
         inspect_type = args[0]
         if inspect_type == "model":
             return self.debugger.inspect_model()
-        elif len(args) < 2:
-            return "Error: Missing name argument. Usage: inspect <type> <name>"
-        name = args[1]
-        if inspect_type == "layer":
-            return self.debugger.inspect_layer(name)
-        elif inspect_type == "weight":
-            return self.debugger.inspect_weights(name)
-        elif inspect_type == "activation":
-            return self.debugger.inspect_activations(name)
-        elif inspect_type == "gradient":
-            return self.debugger.inspect_gradients(name)
+        elif inspect_type in ["layer", "weight", "activation", "gradient"]:
+            if len(args) < 2:
+                return f"Error: Missing layer name for {inspect_type} inspection."
+            layer_name = args[1]
+            if inspect_type == "layer":
+                return self.debugger.inspect_layer(layer_name)
+            elif inspect_type == "weight":
+                if len(args) < 3:
+                    return "Error: Missing weight name. Usage: inspect weight <layer_name> <weight_name>"
+                weight_name = args[2]
+                return self.debugger.inspect_weights(layer_name, weight_name)
+            elif inspect_type == "activation":
+                options = self._parse_options(args[2:])
+                if 'token' in options:
+                    return self.debugger.get_token_activation(layer_name, options['token'])
+                elif 'position' in options:
+                    return self.debugger.get_position_activation(layer_name, int(options['position']))
+                else:
+                    return self.debugger.inspect_activations(layer_name)
+            elif inspect_type == "gradient":
+                options = self._parse_options(args[2:])
+                if 'token' in options:
+                    return self.debugger.get_token_gradient(layer_name, options['token'])
+                else:
+                    return self.debugger.inspect_gradients(layer_name)
         else:
-            return f"Unknown inspection type: {inspect_type}. Valid types are: model, layer, weight, activation, gradient."
+            return f"Unknown inspection type: {inspect_type}. Use 'help inspect' for usage information."
     
     @handle_exceptions
     def cmd_breakpoint(self, *args):
@@ -272,31 +291,51 @@ class CommandHandler:
     @handle_exceptions
     def cmd_analyze(self, *args):
         """
-        Perform various analyses on the model.
-         Usage:
+         Perform various analyses on the model.
+        Usage:
             analyze tokens <input_text> <analysis_type> [options]
-            analyze attention_representation <input_text> [options]
-            analyze gradients [<layer_name>]
-            analyze attention [<layer_name>]
-            analyze activations [<layer_name>]
-            analyze dataset_examples (<input_file> | --inline) <layer1> [<layer2> ...] [--top <n>] [--neuron <idx>]
+            analyze attention <token> [<layer_name>]
+            analyze neuron <token> <layer_name> [--top <n>]
+            analyze gradient <token> [<layer1> <layer2> ...]
+            analyze compare <token1> <token2> [<layer1> <layer2> ...]
+            analyze probability <token1> [<token2> ...] [--input <text>]
         """
-        if not args:
-            return "Error: No analysis type provided. Usage: analyze <subcommand> <args>"
-    
-        subcommand = args[0]
-        if subcommand == "tokens":
+        if len(args) < 2:
+            return "Error: Insufficient arguments. Use 'help analyze' for usage information."
+
+        analysis_type = args[0]
+        if analysis_type == "tokens":
             return self._analyze_tokens(args[1:])
-        elif subcommand == "attention_representation":
-            return self._analyze_attention_representation(args[1:])
-        elif subcommand in ["gradients", "attention", "activations"]:
-            return self._analyze_layer(subcommand, args[1:])
-        elif subcommand == "dataset_examples":
-            return self._analyze_dataset_examples(args[1:])
+        elif analysis_type == "attention":
+            if len(args) < 2:
+                return "Error: Missing token. Usage: analyze attention <token> [<layer_name>]"
+            token = args[1]
+            layer = args[2] if len(args) > 2 else None
+            return self.debugger.visualize_token_attention(token, layer)
+        elif analysis_type == "neuron":
+            if len(args) < 3:
+                return "Error: Insufficient arguments. Usage: analyze neuron <token> <layer_name> [--top <n>]"
+            token, layer_name = args[1], args[2]
+            options = self._parse_options(args[3:])
+            top_n = int(options.get('top', 10))
+            return self.debugger.analyze_token_neuron_activation(token, layer_name, top_n)
+        elif analysis_type == "gradient":
+            if len(args) < 2:
+                return "Error: Missing token. Usage: analyze gradient <token> [<layer1> <layer2> ...]"
+            token = args[1]
+            layers = args[2:] if len(args) > 2 else None
+            return self.debugger.track_token_gradient(token, layers)
+        elif analysis_type == "compare":
+            if len(args) < 3:
+                return "Error: Insufficient arguments. Usage: analyze compare <token1> <token2> [<layer1> <layer2> ...]"
+            token1, token2 = args[1], args[2]
+            layers = args[3:] if len(args) > 3 else None
+            return self.debugger.compare_token_activations(token1, token2, layers)
+        elif analysis_type == "probability":
+            return self._analyze_token_probabilities(args[1:])
         else:
-            return f"Unknown analyze subcommand: {subcommand}. Valid subcommands are: tokens, attention_representation, gradients, attention, activations, dataset_examples."    
-    
-    @handle_exceptions
+            return f"Unknown analysis type: {analysis_type}. Use 'help analyze' for usage information."
+
     def _analyze_tokens(self, args):
         if len(args) < 2:
             return "Error: Insufficient arguments for token analysis. Usage: analyze tokens <input_text> <analysis_type> [options]"
@@ -304,6 +343,7 @@ class CommandHandler:
         analysis_type = args[1]
         options = self._parse_options(args[2:])
         return self.debugger.analyze_tokens(input_text, analysis_type, **options)
+
 
     def _analyze_attention_representation(self, args):
         if len(args) < 1:
@@ -359,9 +399,11 @@ class CommandHandler:
         """
         Manage tracing of execution, activations, or gradients.
         Usage:
-            trace start <type>
+            trace start
+            trace stop
             trace get <type> [<layer_name>]
             trace clear
+            trace follow <token>
         Types: execution, activations, gradients
         """
         if not args:
@@ -369,13 +411,19 @@ class CommandHandler:
 
         subcommand = args[0]
         if subcommand == "start":
-            return self._trace_start(args[1:])
+            self.debugger.tracing_enabled = True
+            return "Tracing enabled. Run the model to collect traces."
+        elif subcommand == "stop":
+            self.debugger.tracing_enabled = False
+            return "Tracing disabled."
         elif subcommand == "get":
             return self._trace_get(args[1:])
         elif subcommand == "clear":
             return self._trace_clear()
+        elif subcommand == "follow":
+            return self._trace_follow(args[1:])
         else:
-            return f"Unknown trace subcommand: {subcommand}. Valid subcommands are: start, get, clear."
+            return f"Unknown trace subcommand: {subcommand}. Valid subcommands are: start, stop, get, clear, follow."
 
     def _trace_start(self, args):
         if not args:
@@ -410,6 +458,31 @@ class CommandHandler:
 
     def _trace_clear(self):
         return self.debugger.clear_all_traces()
+    
+    def _trace_follow(self, args):
+        if not args:
+            return "Error: No token specified. Usage: trace follow <token>"
+        token = args[0]
+        token_ids = self.debugger.tokenizer.encode(token, add_special_tokens=False)
+        if not token_ids:
+            return f"Error: '{token}' could not be tokenized."
+    
+        result = f"Trace for token sequence '{token}':\n"
+        for i, token_id in enumerate(token_ids):
+            sub_token = self.debugger.tokenizer.decode([token_id])
+            token_trace = self.debugger.get_token_trace(sub_token)
+            if not token_trace:
+                result += f"No trace found for sub-token '{sub_token}' (ID: {token_id}) at position {i}.\n"
+                continue
+        
+            result += f"Sub-token: '{sub_token}' (ID: {token_id}) at position {i}:\n"
+            for step in token_trace:
+                result += f"  Layer: {step['layer_name']}\n"
+                result += f"  Output shape: {step['output'].shape}\n"
+                result += f"  Output mean: {step['output'].mean().item():.4f}\n"
+                result += f"  Output std: {step['output'].std().item():.4f}\n\n"
+    
+        return result
     
     @handle_exceptions
     def cmd_compare_tokens(self, *args):
@@ -622,47 +695,88 @@ class CommandHandler:
         while i < len(args):
             if args[i] == '--inline':
                 inline_mode = True
-                i += 1
-            elif args[i] == '--top':
-                top_n = int(args[i+1])
-                i += 2
-            elif args[i] == '--neuron':
-                neuron_idx = int(args[i+1])
-                i += 2
+            elif args[i] == '--top' and i + 1 < len(args):
+                try:
+                    top_n = int(args[i+1])
+                    i += 1
+                except ValueError:
+                    return f"Error: Invalid value for --top: {args[i+1]}"
+            elif args[i] == '--neuron' and i + 1 < len(args):
+                try:
+                    neuron_idx = int(args[i+1])
+                    i += 1
+                except ValueError:
+                    return f"Error: Invalid value for --neuron: {args[i+1]}"
             elif input_source is None and not inline_mode:
                 input_source = args[i]
-                i += 1
             else:
                 layer_names.append(args[i])
-                i += 1
+            i += 1
+
+        if not layer_names:
+            return "Error: No layer names specified."
 
         if inline_mode:
             input_texts = self._get_inline_dataset()
         elif input_source:
             try:
                 with open(input_source, 'r') as f:
-                    input_texts = f.readlines()
+                    input_texts = [line.strip() for line in f if line.strip()]
             except FileNotFoundError:
                 return f"Error: Input file '{input_source}' not found."
+            except IOError:
+                return f"Error: Unable to read file '{input_source}'."
         else:
             return "Error: No input source specified. Use --inline or provide an input file."
 
+        if not input_texts:
+            return "Error: No input texts provided."
+
         result = self.debugger.collect_dataset_examples(input_texts, layer_names, top_n)
-        
+
+        if not result:
+            return "Error: No results returned from collect_dataset_examples."
+
         if neuron_idx is not None:
             return self._format_neuron_examples(result, layer_names, neuron_idx)
+        elif '--token' in args:
+            token_index = args.index('--token')
+            if token_index + 1 < len(args):
+                token = args[token_index + 1]
+                return self._format_token_examples(result, token)
+            else:
+                return "Error: No token provided after --token flag."
         else:
             return self._format_layer_examples(result, layer_names)
     
+    @handle_exceptions
+    def _format_token_examples(self, result, token):
+        token_activations = self.debugger.dataset_example_collector.get_token_activations(token)
+        if not token_activations:
+            return f"No activations found for token '{token}'"
+
+        formatted = f"Activations for token '{token}':\n"
+        for layer, activations in token_activations.items():
+            formatted += f"Layer: {layer}\n"
+            sorted_activations = sorted(activations, reverse=True)[:self.debugger.dataset_example_collector.num_top_examples]
+            for activation, neuron_idx in sorted_activations:
+                formatted += f"  Neuron {neuron_idx}: {activation:.4f}\n"
+            formatted += "\n"
+        return formatted
+
     @handle_exceptions
     def _get_inline_dataset(self):
         print("Enter your dataset examples. Type 'END' on a new line when finished:")
         examples = []
         while True:
-            line = input()
-            if line.strip().upper() == 'END':
-                break
-            examples.append(line)
+            try:
+                line = input().strip()
+                if line.upper() == 'END':
+                    break
+                if line:  # Only add non-empty lines
+                    examples.append(line)
+            except EOFError:
+                break  # Handle Ctrl+D (EOF)
         return examples
 
     @handle_exceptions
@@ -681,10 +795,23 @@ class CommandHandler:
     def _format_layer_examples(self, result, layer_names):
         formatted = ""
         for layer in layer_names:
-            if layer in result:
+            if layer in result and result[layer]:
                 formatted += f"Top activated neurons for layer '{layer}':\n"
-                for neuron_idx, (activation, token) in enumerate(result[layer]):
-                    formatted += f"  Neuron {neuron_idx}: {token} ({activation:.4f})\n"
+                for neuron_idx, neuron_activations in enumerate(result[layer]):
+                    if neuron_activations:
+                        top_activation, top_token = neuron_activations[0]
+                        formatted += f"  Neuron {neuron_idx}: {top_token} ({top_activation:.4f})\n"
             else:
                 formatted += f"No examples found for layer '{layer}'\n"
         return formatted
+    
+    @handle_exceptions
+    def _analyze_token_probabilities(self, args):
+        if len(args) < 1:
+            return "Error: No tokens provided. Usage: analyze probability <token1> [<token2> ...] [--input <text>]"
+    
+        options = self._parse_options(args)
+        tokens = [arg for arg in args if not arg.startswith('--')]
+        input_text = options.get('input')
+    
+        return self.debugger.compare_token_probabilities(tokens, input_text)

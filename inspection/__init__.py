@@ -5,6 +5,7 @@ from .activation_inspector import ActivationInspector
 from .gradient_inspector import GradientInspector
 from .attention_inspector import AttentionInspector
 from .variable_inspector import VariableInspector
+from .token_inspector import TokenInspector
 
 __all__ = [
     'ModelInspector',
@@ -13,5 +14,6 @@ __all__ = [
     'ActivationInspector',
     'GradientInspector',
     'AttentionInspector',
-    'VariableInspector'
+    'VariableInspector',
+    'TokenInspector'
 ]
