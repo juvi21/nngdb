@@ -27,6 +27,9 @@ class ExecutionTracer:
     def clear_trace(self):
         self.execution_trace = []
         return "Execution trace cleared."
+    
+    def traced_layers(self):
+        return [step['layer_name'] for step in self.execution_trace]
 
     def summarize_trace(self):
         summary = []

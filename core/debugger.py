@@ -184,7 +184,7 @@ class NNGDB:
         if self.socket:
             return self.execute_remote('trace_execution')
         self.execution_tracer.trace()
-        for layer_name in self.execution_tracer.traced_layers:
+        for layer_name in self.execution_tracer.traced_layers():
             self.probe_point(layer_name).probe(lambda save_ctx, tensor: setattr(save_ctx, 'traced_tensor', tensor))
         return "Execution tracing enabled with probes. Run the model to collect the trace."
 

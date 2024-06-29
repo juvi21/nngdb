@@ -55,6 +55,4 @@ class AttentionAnalyzer:
         return neighbor_attention.sum().item() / (2 * (seq_len - 1))
 
     def visualize_attention(self, layer_name: str):
-        # This method would typically create a visualization of the attention weights.
-        # For now, we'll just return a message indicating that visualization is not implemented.
         return "Attention visualization not implemented in this version."
